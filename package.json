@@ -1,0 +1,14 @@
+{
+  "name": "talk-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Minimal Discord/TeamSpeak-style chat + voice app (pure JS, no native deps)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  }
+}

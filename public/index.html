@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>talk-app</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div id="login-screen">
+    <div class="login-box">
+      <h1>talk-app</h1>
+      <p>Pick a display name to join.</p>
+      <input id="username-input" placeholder="Display name" maxlength="24" autofocus />
+      <button id="join-btn">Join</button>
+    </div>
+  </div>
+
+  <div id="app-screen" class="hidden">
+    <aside class="sidebar">
+      <div class="section-title">Text Channels</div>
+      <ul id="channel-list"></ul>
+      <div class="section-title">Voice</div>
+      <div id="voice-controls">
+        <button id="voice-toggle-btn">Join Voice</button>
+        <ul id="voice-participants"></ul>
+      </div>
+      <div class="section-title">Online</div>
+      <ul id="presence-list"></ul>
+    </aside>
+    <main class="main">
+      <header class="channel-header">#<span id="current-channel">general</span></header>
+      <div id="messages" class="messages"></div>
+      <form id="message-form" class="message-form">
+        <input id="message-input" placeholder="Message #general" autocomplete="off" />
+        <button type="submit">Send</button>
+      </form>
+    </main>
+  </div>
+
+  <audio id="remote-audios"></audio>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
