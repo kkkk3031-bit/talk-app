@@ -135,30 +135,46 @@ body {
 .video-grid {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  padding: 12px 16px 0;
+  justify-content: center;
+  align-content: flex-start;
+  gap: 16px;
+  padding: 20px 16px;
   flex-shrink: 0;
-  max-height: 45vh;
+  max-height: 65vh;
   overflow-y: auto;
+  background: #1e1f22;
 }
 .video-tile {
   position: relative;
-  width: 240px;
+  width: 360px;
+  max-width: 100%;
   background: #000;
-  border-radius: 8px;
+  border-radius: 12px;
   overflow: hidden;
   aspect-ratio: 4 / 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 0 3px transparent;
+  transition: box-shadow 0.15s ease;
 }
+.video-tile.speaking { box-shadow: 0 0 0 3px #23a55a; }
 .video-tile video { width: 100%; height: 100%; object-fit: cover; }
 .video-tile video.mirrored { transform: scaleX(-1); }
+.video-tile .room-avatar {
+  width: 96px;
+  height: 96px;
+  font-size: 2.5rem;
+}
 .video-tile-label {
   position: absolute;
-  left: 6px;
-  bottom: 6px;
-  background: rgba(0, 0, 0, 0.6);
+  left: 8px;
+  bottom: 8px;
+  background: rgba(0, 0, 0, 0.65);
   color: #fff;
-  font-size: 11px;
-  padding: 2px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 3px 8px;
   border-radius: 4px;
 }
 #voice-media-controls { display: flex; gap: 6px; margin-top: 6px; }
@@ -367,7 +383,11 @@ body {
 
 /* --- mobile layout: off-canvas sidebar, full-width main, bigger tap targets --- */
 @media (max-width: 768px) {
-  .sidebar-toggle { display: flex; }
+  .sidebar-toggle {
+    display: flex;
+    position: relative;
+    z-index: 95; /* must stay above the open sidebar (90) so it's still reachable to close */
+  }
 
   .sidebar {
     position: fixed;
@@ -397,8 +417,9 @@ body {
 
   .icon-btn { width: 36px; height: 36px; font-size: 18px; }
 
-  .video-grid { max-height: 35vh; }
-  .video-tile { width: 44vw; }
+  .video-grid { max-height: 50vh; padding: 12px; gap: 10px; }
+  .video-tile { width: 88vw; }
+  .video-tile .room-avatar { width: 72px; height: 72px; font-size: 1.8rem; }
 
   .attachment-img { max-width: 70vw; }
 

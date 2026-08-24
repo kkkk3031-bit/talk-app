@@ -14,7 +14,6 @@ const attachBtn = document.getElementById('attach-btn');
 const fileInput = document.getElementById('file-input');
 const attachmentPreviewEl = document.getElementById('attachment-preview');
 const voiceToggleBtn = document.getElementById('voice-toggle-btn');
-const voiceParticipantsEl = document.getElementById('voice-participants');
 const voiceMediaControlsEl = document.getElementById('voice-media-controls');
 const cameraToggleBtn = document.getElementById('camera-toggle-btn');
 const videoGridEl = document.getElementById('video-grid');
@@ -128,6 +127,7 @@ function startVAD(stream) {
     if (nowSpeaking !== speaking) {
       speaking = nowSpeaking;
       voiceToggleBtn.classList.toggle('speaking', speaking);
+      setTileSpeaking('me', speaking);
     }
     vadRAF = requestAnimationFrame(loop);
   })();
@@ -214,10 +214,12 @@ function renderChannelList(channels) {
 function openSidebar() {
   sidebarEl.classList.add('open');
   sidebarOverlayEl.classList.remove('hidden');
+  sidebarToggleBtn.textContent = '✕';
 }
 function closeSidebar() {
   sidebarEl.classList.remove('open');
   sidebarOverlayEl.classList.add('hidden');
+  sidebarToggleBtn.textContent = '☰';
 }
 sidebarToggleBtn.addEventListener('click', () => {
   sidebarEl.classList.contains('open') ? closeSidebar() : openSidebar();
@@ -385,6 +387,7 @@ function addAudioEl(peerId, stream) {
   }
   el.volume = settings.volume / 100;
   el.srcObject = stream;
+  watchRemoteSpeaking(peerId, stream);
 }
 
 function removeAudioEl(peerId) {
@@ -392,38 +395,109 @@ function removeAudioEl(peerId) {
   if (el) el.remove();
 }
 
-// --- video tiles (camera + screen share both render here, tagged by kind) ---
+// --- voice room: one big tile per participant (Discord-style), avatar circle
+// by default, swapped for their live video when camera/screen is on ---
 function showVideoGrid() { videoGridEl.classList.remove('hidden'); }
 function hideVideoGridIfEmpty() {
   if (!videoGridEl.children.length) videoGridEl.classList.add('hidden');
 }
 
-function addVideoTile(key, label, stream, { muted = false, mirror = false } = {}) {
-  let tile = document.getElementById('video-tile-' + key);
+function ensureRoomTile(peerId, label) {
+  let tile = document.getElementById('room-tile-' + peerId);
   if (!tile) {
     tile = document.createElement('div');
     tile.className = 'video-tile';
-    tile.id = 'video-tile-' + key;
-    const video = document.createElement('video');
+    tile.id = 'room-tile-' + peerId;
+    const avatar = document.createElement('div');
+    avatar.className = 'avatar room-avatar';
+    avatar.textContent = label.slice(0, 1).toUpperCase();
+    avatar.style.background = avatarColor(label);
+    const labelEl = document.createElement('div');
+    labelEl.className = 'video-tile-label';
+    labelEl.textContent = label;
+    tile.appendChild(avatar);
+    tile.appendChild(labelEl);
+    videoGridEl.appendChild(tile);
+    showVideoGrid();
+  }
+  return tile;
+}
+
+function removeRoomTile(peerId) {
+  const tile = document.getElementById('room-tile-' + peerId);
+  if (tile) tile.remove();
+  hideVideoGridIfEmpty();
+  stopWatchingRemoteSpeaking(peerId);
+}
+
+function setTileVideo(peerId, label, stream, { muted = false, mirror = false } = {}) {
+  const tile = ensureRoomTile(peerId, label);
+  tile.querySelector('.room-avatar')?.remove();
+  let video = tile.querySelector('video');
+  if (!video) {
+    video = document.createElement('video');
     video.autoplay = true;
     video.playsInline = true;
     video.muted = muted;
     if (mirror) video.classList.add('mirrored');
-    const labelEl = document.createElement('div');
-    labelEl.className = 'video-tile-label';
-    labelEl.textContent = label;
-    tile.appendChild(video);
-    tile.appendChild(labelEl);
-    videoGridEl.appendChild(tile);
+    tile.insertBefore(video, tile.firstChild);
   }
-  tile.querySelector('video').srcObject = stream;
-  showVideoGrid();
+  video.srcObject = stream;
 }
 
-function removeVideoTile(key) {
-  const tile = document.getElementById('video-tile-' + key);
-  if (tile) tile.remove();
-  hideVideoGridIfEmpty();
+function setTileAvatarOnly(peerId, label) {
+  const tile = document.getElementById('room-tile-' + peerId);
+  if (!tile) return;
+  const video = tile.querySelector('video');
+  if (video) video.remove();
+  if (!tile.querySelector('.room-avatar')) {
+    const avatar = document.createElement('div');
+    avatar.className = 'avatar room-avatar';
+    avatar.textContent = label.slice(0, 1).toUpperCase();
+    avatar.style.background = avatarColor(label);
+    tile.insertBefore(avatar, tile.firstChild);
+  }
+}
+
+function setTileSpeaking(peerId, speaking) {
+  const tile = document.getElementById('room-tile-' + peerId);
+  if (tile) tile.classList.toggle('speaking', speaking);
+}
+
+// remote-peer speaking detection mirrors the local VAD, so every tile in the
+// room gets the same "who's talking" ring, not just the local user's button
+const remoteVadHandles = new Map(); // peerId -> { ctx, raf }
+function watchRemoteSpeaking(peerId, stream) {
+  stopWatchingRemoteSpeaking(peerId);
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const source = ctx.createMediaStreamSource(stream);
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 512;
+  analyser.smoothingTimeConstant = 0.5;
+  source.connect(analyser);
+  const data = new Uint8Array(analyser.frequencyBinCount);
+  const THRESHOLD = 14;
+  let speaking = false;
+  let raf;
+  (function loop() {
+    analyser.getByteFrequencyData(data);
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) sum += data[i];
+    const nowSpeaking = sum / data.length > THRESHOLD;
+    if (nowSpeaking !== speaking) {
+      speaking = nowSpeaking;
+      setTileSpeaking(peerId, speaking);
+    }
+    raf = requestAnimationFrame(loop);
+  })();
+  remoteVadHandles.set(peerId, { ctx, get raf() { return raf; } });
+}
+function stopWatchingRemoteSpeaking(peerId) {
+  const handle = remoteVadHandles.get(peerId);
+  if (!handle) return;
+  cancelAnimationFrame(handle.raf);
+  handle.ctx.close();
+  remoteVadHandles.delete(peerId);
 }
 
 const VOICE_MAX_BITRATE = 64000; // bump above Opus's default ~32kbps mono for clearer voice
@@ -451,8 +525,8 @@ function createPeerConnection(peerId) {
   };
   pc.ontrack = (e) => {
     if (e.track.kind === 'video') {
-      const username = (peerUsernames.get(peerId) || peerId) + ' (camera)';
-      addVideoTile('cam-' + peerId, username, e.streams[0]);
+      const username = peerUsernames.get(peerId) || peerId;
+      setTileVideo(peerId, username, e.streams[0]);
     } else {
       addAudioEl(peerId, e.streams[0]);
     }
@@ -481,24 +555,22 @@ const peerUsernames = new Map(); // peerId -> username, for labeling remote vide
 socket.on('voice-peers', async (peers) => {
   for (const p of peers) {
     peerUsernames.set(p.id, p.username);
+    ensureRoomTile(p.id, p.username);
     await callPeer(p.id);
   }
 });
 
 socket.on('voice-peer-joined', (peer) => {
   peerUsernames.set(peer.id, peer.username);
-  renderVoiceParticipant(peer.id, peer.username);
+  ensureRoomTile(peer.id, peer.username);
 });
 
 socket.on('voice-peer-left', ({ id }) => {
   const pc = peerConnections.get(id);
   if (pc) { pc.close(); peerConnections.delete(id); }
   removeAudioEl(id);
-  removeVideoTile('cam-' + id);
-  removeVideoTile('screen-' + id);
+  removeRoomTile(id);
   peerUsernames.delete(id);
-  const li = document.getElementById('voice-p-' + id);
-  if (li) li.remove();
 });
 
 socket.on('voice-signal', async ({ from, signal }) => {
@@ -514,17 +586,9 @@ socket.on('voice-signal', async ({ from, signal }) => {
   } else if (signal.type === 'ice') {
     if (pc) { try { await pc.addIceCandidate(signal.candidate); } catch {} }
   } else if (signal.type === 'video-off') {
-    removeVideoTile((signal.kind || 'cam') + '-' + from);
+    setTileAvatarOnly(from, peerUsernames.get(from) || from);
   }
 });
-
-function renderVoiceParticipant(id, username) {
-  if (document.getElementById('voice-p-' + id)) return;
-  const li = document.createElement('li');
-  li.id = 'voice-p-' + id;
-  li.textContent = username;
-  voiceParticipantsEl.appendChild(li);
-}
 
 voiceToggleBtn.addEventListener('click', async () => {
   if (!inVoice) {
@@ -547,7 +611,7 @@ voiceToggleBtn.addEventListener('click', async () => {
     muteMicBtn.disabled = false;
     muteMicBtn.textContent = '🎤';
     muteMicBtn.classList.remove('muted');
-    renderVoiceParticipant('me', myUsername + ' (you)');
+    ensureRoomTile('me', myUsername);
     voiceMediaControlsEl.classList.remove('hidden');
     socket.emit('voice-join');
     startVAD(localStream);
@@ -560,7 +624,7 @@ voiceToggleBtn.addEventListener('click', async () => {
     peerConnections.forEach((pc) => pc.close());
     peerConnections.clear();
     peerUsernames.clear();
-    voiceParticipantsEl.innerHTML = '';
+    remoteVadHandles.forEach((_, peerId) => stopWatchingRemoteSpeaking(peerId));
     videoGridEl.innerHTML = '';
     videoGridEl.classList.add('hidden');
     stopVAD();
@@ -583,7 +647,7 @@ async function startCamera() {
   cameraOn = true;
   cameraToggleBtn.classList.add('active');
   cameraToggleBtn.title = 'Turn off camera';
-  addVideoTile('cam-me', myUsername + ' (you)', cameraStream, { muted: true, mirror: true });
+  setTileVideo('me', myUsername, cameraStream, { muted: true, mirror: true });
   for (const [peerId, pc] of peerConnections) {
     cameraStream.getTracks().forEach((t) => pc.addTrack(t, cameraStream));
     await renegotiate(peerId);
@@ -602,7 +666,7 @@ function stopCamera() {
   cameraOn = false;
   cameraToggleBtn.classList.remove('active');
   cameraToggleBtn.title = 'Turn on camera';
-  removeVideoTile('cam-me');
+  setTileAvatarOnly('me', myUsername);
 }
 
 cameraToggleBtn.addEventListener('click', () => {
