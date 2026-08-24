@@ -21,8 +21,33 @@ try {
 } catch {
   history = Object.fromEntries(CHANNELS.map((c) => [c, []]));
 }
+// Serialized + atomic persistence: only one write in flight at a time (concurrent
+// fs.writeFile calls to the same path can complete out of order and silently drop
+// messages), and writes land via tmp-file + rename so a crash mid-write can never
+// leave a truncated/corrupt history.json on disk.
+let historyWriteInFlight = false;
+let historyWritePending = false;
+
 function saveHistory() {
-  fs.writeFile(HISTORY_FILE, JSON.stringify(history), () => {});
+  if (historyWriteInFlight) { historyWritePending = true; return; }
+  historyWriteInFlight = true;
+  const data = JSON.stringify(history);
+  const tmpFile = `${HISTORY_FILE}.tmp`;
+  fs.writeFile(tmpFile, data, (err) => {
+    if (err) {
+      historyWriteInFlight = false;
+      console.error('[history] write failed:', err);
+      return;
+    }
+    fs.rename(tmpFile, HISTORY_FILE, (err) => {
+      historyWriteInFlight = false;
+      if (err) console.error('[history] rename failed:', err);
+      if (historyWritePending) {
+        historyWritePending = false;
+        saveHistory();
+      }
+    });
+  });
 }
 
 // socket.id -> { username, channel, inVoice }
