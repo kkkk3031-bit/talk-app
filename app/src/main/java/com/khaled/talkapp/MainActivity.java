@@ -12,7 +12,9 @@ import android.webkit.WebView;
 
 public class MainActivity extends Activity {
 
-    private static final String SERVER_URL = "https://off-toll-nodes-aquarium.trycloudflare.com";
+    // 10.0.2.2 is the emulator's alias for the host machine's loopback — local dev only.
+    // Swap for a real deployed URL (HTTPS required for mic access) before shipping.
+    private static final String SERVER_URL = "http://10.0.2.2:3000";
     private WebView webView;
 
     @SuppressLint("SetJavaScriptEnabled")
