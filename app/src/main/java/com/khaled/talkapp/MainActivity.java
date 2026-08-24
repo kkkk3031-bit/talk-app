@@ -12,7 +12,7 @@ import android.webkit.WebView;
 
 public class MainActivity extends Activity {
 
-    private static final String SERVER_URL = "http://127.0.0.1:3000";
+    private static final String SERVER_URL = "https://off-toll-nodes-aquarium.trycloudflare.com";
     private WebView webView;
 
     @SuppressLint("SetJavaScriptEnabled")
