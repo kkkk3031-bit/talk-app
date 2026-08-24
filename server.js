@@ -36,12 +36,15 @@ function broadcastPresence() {
 app.use(express.static(path.join(__dirname, 'public')));
 
 io.on('connection', (socket) => {
+  console.log(`[connect] ${socket.id} from ${socket.handshake.headers['x-forwarded-for'] || socket.handshake.address}`);
+
   socket.on('join', (username) => {
     username = String(username || '').trim().slice(0, 24) || `guest-${socket.id.slice(0, 4)}`;
     users.set(socket.id, { username, channel: 'general', inVoice: false });
     socket.join('general');
     socket.emit('joined', { username, channels: CHANNELS, history: history['general'] || [] });
     broadcastPresence();
+    console.log(`[join] ${socket.id} -> "${username}"`);
   });
 
   socket.on('switch-channel', (channel) => {
@@ -79,6 +82,7 @@ io.on('connection', (socket) => {
     socket.emit('voice-peers', peers.map(([id, other]) => ({ id, username: other.username })));
     socket.to(VOICE_CHANNEL).emit('voice-peer-joined', { id: socket.id, username: u.username });
     broadcastPresence();
+    console.log(`[voice-join] "${u.username}" joined voice, existing peers: [${peers.map(([, o]) => o.username).join(', ')}]`);
   });
 
   socket.on('voice-leave', () => {
@@ -88,10 +92,14 @@ io.on('connection', (socket) => {
     socket.leave(VOICE_CHANNEL);
     socket.to(VOICE_CHANNEL).emit('voice-peer-left', { id: socket.id });
     broadcastPresence();
+    console.log(`[voice-leave] "${u.username}" left voice`);
   });
 
   socket.on('voice-signal', ({ to, signal }) => {
     io.to(to).emit('voice-signal', { from: socket.id, signal });
+    const u = users.get(socket.id);
+    const target = users.get(to);
+    console.log(`[voice-signal] ${signal.type} from "${u ? u.username : socket.id}" -> "${target ? target.username : to}"`);
   });
 
   socket.on('disconnect', () => {
@@ -99,6 +107,7 @@ io.on('connection', (socket) => {
     users.delete(socket.id);
     if (u && u.inVoice) socket.to(VOICE_CHANNEL).emit('voice-peer-left', { id: socket.id });
     broadcastPresence();
+    console.log(`[disconnect] ${socket.id}${u ? ` ("${u.username}")` : ''}`);
   });
 });
 
