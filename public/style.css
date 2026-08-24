@@ -143,6 +143,41 @@ body {
 }
 .message:hover .delete-btn { display: inline-block; }
 .message .delete-btn:hover { color: #da373c; }
+.attachment-img {
+  max-width: 320px;
+  max-height: 240px;
+  border-radius: 8px;
+  display: block;
+  margin-top: 4px;
+}
+.attachment-file {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 8px 12px;
+  background: #2b2d31;
+  border-radius: 6px;
+  color: #00a8fc;
+  text-decoration: none;
+  font-size: 13px;
+}
+.attachment-file:hover { text-decoration: underline; }
+.attachment-size { color: #949ba4; }
+.attachment-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 16px;
+  font-size: 13px;
+  color: #dbdee1;
+}
+.attachment-remove {
+  background: none;
+  border: none;
+  color: #949ba4;
+  cursor: pointer;
+  font-size: 13px;
+}
+.attachment-remove:hover { color: #da373c; }
 .typing-indicator {
   height: 18px;
   padding: 0 16px;

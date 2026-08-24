@@ -10,6 +10,9 @@ const currentChannelEl = document.getElementById('current-channel');
 const messagesEl = document.getElementById('messages');
 const messageForm = document.getElementById('message-form');
 const messageInput = document.getElementById('message-input');
+const attachBtn = document.getElementById('attach-btn');
+const fileInput = document.getElementById('file-input');
+const attachmentPreviewEl = document.getElementById('attachment-preview');
 const voiceToggleBtn = document.getElementById('voice-toggle-btn');
 const voiceParticipantsEl = document.getElementById('voice-participants');
 const userBarAvatar = document.getElementById('user-bar-avatar');
@@ -133,15 +136,31 @@ function stopVAD() {
 
 function go(fn) { document.readyState === 'loading' ? document.addEventListener('DOMContentLoaded', fn) : fn(); }
 
-function renderMessage({ id, username, text, ts }, system = false) {
+function isImageMime(mime) { return /^image\//.test(mime || ''); }
+function formatSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+function renderAttachment(att) {
+  if (!att) return '';
+  if (isImageMime(att.mime)) {
+    return `<a href="${att.url}" target="_blank" rel="noopener"><img class="attachment-img" src="${att.url}" alt="${escapeHtml(att.name)}" /></a>`;
+  }
+  return `<a class="attachment-file" href="${att.url}" target="_blank" rel="noopener" download="${escapeHtml(att.name)}">📄 ${escapeHtml(att.name)} <span class="attachment-size">(${formatSize(att.size)})</span></a>`;
+}
+
+function renderMessage({ id, username, text, attachment, ts }, system = false) {
   const div = document.createElement('div');
   div.className = 'message' + (system ? ' system' : '');
   if (id) div.dataset.id = id;
   const time = new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const mine = !system && username === myUsername;
+  const textHtml = text ? `<br/><span class="text">${escapeHtml(text)}</span>` : '';
+  const attHtml = attachment ? `<br/>${renderAttachment(attachment)}` : '';
   div.innerHTML = system
     ? `<span class="text">${escapeHtml(text)}</span>`
-    : `<span class="author">${escapeHtml(username)}</span><span class="time">${time}</span>${mine ? '<button class="delete-btn" title="Delete">🗑</button>' : ''}<br/><span class="text">${escapeHtml(text)}</span>`;
+    : `<span class="author">${escapeHtml(username)}</span><span class="time">${time}</span>${mine ? '<button class="delete-btn" title="Delete">🗑</button>' : ''}${textHtml}${attHtml}`;
   if (mine) {
     div.querySelector('.delete-btn').addEventListener('click', () => {
       socket.emit('delete-message', { channel: currentChannel, id });
@@ -238,12 +257,51 @@ socket.on('message-deleted', ({ channel, id }) => {
 
 socket.on('presence', renderPresence);
 
+let pendingAttachment = null;
+
+attachBtn.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', async () => {
+  const file = fileInput.files[0];
+  fileInput.value = '';
+  if (!file) return;
+  attachmentPreviewEl.textContent = `Uploading ${file.name}…`;
+  attachmentPreviewEl.classList.remove('hidden');
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch('/api/upload', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Upload failed');
+    pendingAttachment = data;
+    attachmentPreviewEl.innerHTML = '';
+    const label = document.createElement('span');
+    label.textContent = `📎 ${data.name} (${formatSize(data.size)})`;
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.textContent = '✕';
+    removeBtn.className = 'attachment-remove';
+    removeBtn.addEventListener('click', () => {
+      pendingAttachment = null;
+      attachmentPreviewEl.classList.add('hidden');
+      attachmentPreviewEl.innerHTML = '';
+    });
+    attachmentPreviewEl.appendChild(label);
+    attachmentPreviewEl.appendChild(removeBtn);
+  } catch (err) {
+    attachmentPreviewEl.textContent = `Upload failed: ${err.message}`;
+    setTimeout(() => attachmentPreviewEl.classList.add('hidden'), 3000);
+  }
+});
+
 messageForm.addEventListener('submit', (e) => {
   e.preventDefault();
   const text = messageInput.value.trim();
-  if (!text) return;
-  socket.emit('chat-message', text);
+  if (!text && !pendingAttachment) return;
+  socket.emit('chat-message', { text, attachment: pendingAttachment });
   messageInput.value = '';
+  pendingAttachment = null;
+  attachmentPreviewEl.classList.add('hidden');
+  attachmentPreviewEl.innerHTML = '';
 });
 
 // --- typing indicator ---

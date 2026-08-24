@@ -2,6 +2,8 @@ const express = require('express');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
+const multer = require('multer');
 const { Server } = require('socket.io');
 
 const app = express();
@@ -10,6 +12,25 @@ const io = new Server(server);
 
 const PORT = process.env.PORT || 3000;
 const HISTORY_FILE = path.join(__dirname, 'history.json');
+const UPLOAD_DIR = path.join(__dirname, 'public', 'uploads');
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+const ALLOWED_MIME = new Set([
+  'image/png', 'image/jpeg', 'image/gif', 'image/webp',
+  'application/pdf', 'text/plain',
+  'application/zip', 'application/msword',
+]);
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: UPLOAD_DIR,
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname).slice(0, 10).replace(/[^a-zA-Z0-9.]/g, '');
+      cb(null, `${Date.now()}-${crypto.randomBytes(6).toString('hex')}${ext}`);
+    },
+  }),
+  limits: { fileSize: 15 * 1024 * 1024 }, // 15MB
+  fileFilter: (req, file, cb) => cb(null, ALLOWED_MIME.has(file.mimetype)),
+});
 
 const CHANNELS = ['general', 'random'];
 const VOICE_CHANNEL = 'voice-lounge';
@@ -69,6 +90,22 @@ function broadcastPresence() {
 
 app.use(express.static(path.join(__dirname, 'public')));
 
+app.post('/api/upload', (req, res) => {
+  upload.single('file')(req, res, (err) => {
+    if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ error: 'File too large (15MB max)' });
+    }
+    if (err) return res.status(500).json({ error: 'Upload failed' });
+    if (!req.file) return res.status(400).json({ error: 'Unsupported file type' });
+    res.json({
+      url: `/uploads/${req.file.filename}`,
+      name: req.file.originalname.slice(0, 200),
+      mime: req.file.mimetype,
+      size: req.file.size,
+    });
+  });
+});
+
 io.on('connection', (socket) => {
   console.log(`[connect] ${socket.id} from ${socket.handshake.headers['x-forwarded-for'] || socket.handshake.address}`);
 
@@ -90,13 +127,25 @@ io.on('connection', (socket) => {
     socket.emit('channel-history', { channel, history: publicHistory(history[channel]) });
   });
 
-  socket.on('chat-message', (text) => {
+  socket.on('chat-message', (payload) => {
     const u = users.get(socket.id);
-    if (!u || !text) return;
+    if (!u) return;
+    const { text, attachment } = typeof payload === 'string' ? { text: payload } : (payload || {});
+    if (!text && !attachment) return;
+    let safeAttachment = null;
+    if (attachment && typeof attachment.url === 'string' && attachment.url.startsWith('/uploads/')) {
+      safeAttachment = {
+        url: attachment.url,
+        name: String(attachment.name || 'file').slice(0, 200),
+        mime: String(attachment.mime || '').slice(0, 100),
+        size: Number(attachment.size) || 0,
+      };
+    }
     const msg = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       username: u.username,
-      text: String(text).slice(0, 2000),
+      text: String(text || '').slice(0, 2000),
+      attachment: safeAttachment,
       ts: Date.now(),
       ownerId: socket.id, // stripped before broadcast; server-side ownership check for delete
     };

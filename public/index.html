@@ -39,7 +39,10 @@
       <header class="channel-header">#<span id="current-channel">general</span></header>
       <div id="messages" class="messages"></div>
       <div id="typing-indicator" class="typing-indicator"></div>
+      <div id="attachment-preview" class="attachment-preview hidden"></div>
       <form id="message-form" class="message-form">
+        <button type="button" id="attach-btn" class="icon-btn" title="Attach file or image">📎</button>
+        <input id="file-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,application/zip,application/msword" hidden />
         <input id="message-input" placeholder="Message #general" autocomplete="off" />
         <button type="submit">Send</button>
       </form>
