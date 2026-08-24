@@ -23,6 +23,9 @@
       <div class="section-title">Voice</div>
       <div id="voice-controls">
         <button id="voice-toggle-btn">Join Voice</button>
+        <div id="voice-media-controls" class="hidden">
+          <button id="camera-toggle-btn" class="icon-btn" title="Turn on camera">📷</button>
+        </div>
         <ul id="voice-participants"></ul>
       </div>
       <div class="section-title">Online</div>
@@ -37,6 +40,7 @@
     </aside>
     <main class="main">
       <header class="channel-header">#<span id="current-channel">general</span></header>
+      <div id="video-grid" class="video-grid hidden"></div>
       <div id="messages" class="messages"></div>
       <div id="typing-indicator" class="typing-indicator"></div>
       <div id="attachment-preview" class="attachment-preview hidden"></div>

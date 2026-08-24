@@ -15,6 +15,9 @@ const fileInput = document.getElementById('file-input');
 const attachmentPreviewEl = document.getElementById('attachment-preview');
 const voiceToggleBtn = document.getElementById('voice-toggle-btn');
 const voiceParticipantsEl = document.getElementById('voice-participants');
+const voiceMediaControlsEl = document.getElementById('voice-media-controls');
+const cameraToggleBtn = document.getElementById('camera-toggle-btn');
+const videoGridEl = document.getElementById('video-grid');
 const userBarAvatar = document.getElementById('user-bar-avatar');
 const userBarName = document.getElementById('user-bar-name');
 const muteMicBtn = document.getElementById('mute-mic-btn');
@@ -372,6 +375,40 @@ function removeAudioEl(peerId) {
   if (el) el.remove();
 }
 
+// --- video tiles (camera + screen share both render here, tagged by kind) ---
+function showVideoGrid() { videoGridEl.classList.remove('hidden'); }
+function hideVideoGridIfEmpty() {
+  if (!videoGridEl.children.length) videoGridEl.classList.add('hidden');
+}
+
+function addVideoTile(key, label, stream, { muted = false, mirror = false } = {}) {
+  let tile = document.getElementById('video-tile-' + key);
+  if (!tile) {
+    tile = document.createElement('div');
+    tile.className = 'video-tile';
+    tile.id = 'video-tile-' + key;
+    const video = document.createElement('video');
+    video.autoplay = true;
+    video.playsInline = true;
+    video.muted = muted;
+    if (mirror) video.classList.add('mirrored');
+    const labelEl = document.createElement('div');
+    labelEl.className = 'video-tile-label';
+    labelEl.textContent = label;
+    tile.appendChild(video);
+    tile.appendChild(labelEl);
+    videoGridEl.appendChild(tile);
+  }
+  tile.querySelector('video').srcObject = stream;
+  showVideoGrid();
+}
+
+function removeVideoTile(key) {
+  const tile = document.getElementById('video-tile-' + key);
+  if (tile) tile.remove();
+  hideVideoGridIfEmpty();
+}
+
 const VOICE_MAX_BITRATE = 64000; // bump above Opus's default ~32kbps mono for clearer voice
 
 async function boostBitrate(sender) {
@@ -389,12 +426,30 @@ function createPeerConnection(peerId) {
       boostBitrate(sender);
     });
   }
+  if (cameraStream) {
+    cameraStream.getTracks().forEach((t) => pc.addTrack(t, cameraStream));
+  }
   pc.onicecandidate = (e) => {
     if (e.candidate) socket.emit('voice-signal', { to: peerId, signal: { type: 'ice', candidate: e.candidate } });
   };
-  pc.ontrack = (e) => addAudioEl(peerId, e.streams[0]);
+  pc.ontrack = (e) => {
+    if (e.track.kind === 'video') {
+      const username = (peerUsernames.get(peerId) || peerId) + ' (camera)';
+      addVideoTile('cam-' + peerId, username, e.streams[0]);
+    } else {
+      addAudioEl(peerId, e.streams[0]);
+    }
+  };
   peerConnections.set(peerId, pc);
   return pc;
+}
+
+async function renegotiate(peerId) {
+  const pc = peerConnections.get(peerId);
+  if (!pc) return;
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  socket.emit('voice-signal', { to: peerId, signal: { type: 'offer', sdp: offer } });
 }
 
 async function callPeer(peerId) {
@@ -404,11 +459,17 @@ async function callPeer(peerId) {
   socket.emit('voice-signal', { to: peerId, signal: { type: 'offer', sdp: offer } });
 }
 
+const peerUsernames = new Map(); // peerId -> username, for labeling remote video tiles
+
 socket.on('voice-peers', async (peers) => {
-  for (const p of peers) await callPeer(p.id);
+  for (const p of peers) {
+    peerUsernames.set(p.id, p.username);
+    await callPeer(p.id);
+  }
 });
 
 socket.on('voice-peer-joined', (peer) => {
+  peerUsernames.set(peer.id, peer.username);
   renderVoiceParticipant(peer.id, peer.username);
 });
 
@@ -416,6 +477,9 @@ socket.on('voice-peer-left', ({ id }) => {
   const pc = peerConnections.get(id);
   if (pc) { pc.close(); peerConnections.delete(id); }
   removeAudioEl(id);
+  removeVideoTile('cam-' + id);
+  removeVideoTile('screen-' + id);
+  peerUsernames.delete(id);
   const li = document.getElementById('voice-p-' + id);
   if (li) li.remove();
 });
@@ -432,6 +496,8 @@ socket.on('voice-signal', async ({ from, signal }) => {
     if (pc) await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
   } else if (signal.type === 'ice') {
     if (pc) { try { await pc.addIceCandidate(signal.candidate); } catch {} }
+  } else if (signal.type === 'video-off') {
+    removeVideoTile((signal.kind || 'cam') + '-' + from);
   }
 });
 
@@ -465,17 +531,64 @@ voiceToggleBtn.addEventListener('click', async () => {
     muteMicBtn.textContent = '🎤';
     muteMicBtn.classList.remove('muted');
     renderVoiceParticipant('me', myUsername + ' (you)');
+    voiceMediaControlsEl.classList.remove('hidden');
     socket.emit('voice-join');
     startVAD(localStream);
   } else {
     inVoice = false;
     voiceToggleBtn.textContent = 'Join Voice';
     muteMicBtn.disabled = true;
+    voiceMediaControlsEl.classList.add('hidden');
+    if (cameraOn) stopCamera();
     peerConnections.forEach((pc) => pc.close());
     peerConnections.clear();
+    peerUsernames.clear();
     voiceParticipantsEl.innerHTML = '';
+    videoGridEl.innerHTML = '';
+    videoGridEl.classList.add('hidden');
     stopVAD();
     if (localStream) { localStream.getTracks().forEach((t) => t.stop()); localStream = null; }
     socket.emit('voice-leave');
   }
+});
+
+// --- camera ---
+let cameraStream = null;
+let cameraOn = false;
+
+async function startCamera() {
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240 } });
+  } catch (err) {
+    alert('Camera access denied or unavailable: ' + err.message);
+    return;
+  }
+  cameraOn = true;
+  cameraToggleBtn.classList.add('active');
+  cameraToggleBtn.title = 'Turn off camera';
+  addVideoTile('cam-me', myUsername + ' (you)', cameraStream, { muted: true, mirror: true });
+  for (const [peerId, pc] of peerConnections) {
+    cameraStream.getTracks().forEach((t) => pc.addTrack(t, cameraStream));
+    await renegotiate(peerId);
+  }
+}
+
+function stopCamera() {
+  if (!cameraStream) return;
+  cameraStream.getTracks().forEach((t) => t.stop());
+  for (const [peerId, pc] of peerConnections) {
+    pc.getSenders().filter((s) => s.track && s.track.kind === 'video').forEach((s) => pc.removeTrack(s));
+    renegotiate(peerId);
+    socket.emit('voice-signal', { to: peerId, signal: { type: 'video-off', kind: 'cam' } });
+  }
+  cameraStream = null;
+  cameraOn = false;
+  cameraToggleBtn.classList.remove('active');
+  cameraToggleBtn.title = 'Turn on camera';
+  removeVideoTile('cam-me');
+}
+
+cameraToggleBtn.addEventListener('click', () => {
+  if (cameraOn) stopCamera();
+  else startCamera();
 });
