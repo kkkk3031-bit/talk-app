@@ -6,7 +6,6 @@ const usernameInput = document.getElementById('username-input');
 const joinBtn = document.getElementById('join-btn');
 const channelList = document.getElementById('channel-list');
 const presenceList = document.getElementById('presence-list');
-const currentChannelEl = document.getElementById('current-channel');
 const messagesEl = document.getElementById('messages');
 const messageForm = document.getElementById('message-form');
 const messageInput = document.getElementById('message-input');
@@ -17,6 +16,12 @@ const voiceToggleBtn = document.getElementById('voice-toggle-btn');
 const voiceMediaControlsEl = document.getElementById('voice-media-controls');
 const cameraToggleBtn = document.getElementById('camera-toggle-btn');
 const videoGridEl = document.getElementById('video-grid');
+const voiceRoomNavEl = document.getElementById('voice-room-nav');
+const mainHeaderTextEl = document.getElementById('main-header-text');
+const voiceViewEl = document.getElementById('voice-view');
+const textViewEl = document.getElementById('text-view');
+const voiceEmptyStateEl = document.getElementById('voice-empty-state');
+const voiceEmptyJoinBtn = document.getElementById('voice-empty-join-btn');
 const userBarAvatar = document.getElementById('user-bar-avatar');
 const userBarName = document.getElementById('user-bar-name');
 const muteMicBtn = document.getElementById('mute-mic-btn');
@@ -193,11 +198,8 @@ function renderChannelList(channels) {
     const li = document.createElement('li');
     li.textContent = `# ${c}`;
     li.dataset.channel = c;
-    if (c === currentChannel) li.classList.add('active');
     li.addEventListener('click', () => {
-      if (c === currentChannel) return;
       currentChannel = c;
-      currentChannelEl.textContent = c;
       messageInput.placeholder = `Message #${c}`;
       [...channelList.children].forEach((el) => el.classList.toggle('active', el.dataset.channel === c));
       unreadCounts[c] = 0;
@@ -205,11 +207,26 @@ function renderChannelList(channels) {
       typingUsers.clear();
       renderTyping();
       socket.emit('switch-channel', c);
+      setMainView('text');
       closeSidebar();
     });
     channelList.appendChild(li);
   });
 }
+
+// --- main view: land on the Voice room after login; text channels are opt-in ---
+let mainView = 'voice';
+function setMainView(view) {
+  mainView = view;
+  const inText = view === 'text';
+  textViewEl.classList.toggle('hidden', !inText);
+  voiceViewEl.classList.toggle('hidden', inText);
+  voiceRoomNavEl.classList.toggle('active', !inText);
+  [...channelList.children].forEach((el) => el.classList.toggle('active', inText && el.dataset.channel === currentChannel));
+  mainHeaderTextEl.textContent = inText ? `# ${currentChannel}` : '🔊 Voice Room';
+}
+voiceRoomNavEl.addEventListener('click', () => { setMainView('voice'); closeSidebar(); });
+voiceEmptyJoinBtn.addEventListener('click', () => voiceToggleBtn.click());
 
 function openSidebar() {
   sidebarEl.classList.add('open');
@@ -255,6 +272,7 @@ socket.on('joined', ({ username, channels, history }) => {
   renderChannelList(channels);
   messagesEl.innerHTML = '';
   history.forEach((m) => renderMessage(m));
+  setMainView('voice');
 });
 
 socket.on('channel-history', ({ channel, history }) => {
@@ -397,9 +415,15 @@ function removeAudioEl(peerId) {
 
 // --- voice room: one big tile per participant (Discord-style), avatar circle
 // by default, swapped for their live video when camera/screen is on ---
-function showVideoGrid() { videoGridEl.classList.remove('hidden'); }
+function showVideoGrid() {
+  videoGridEl.classList.remove('hidden');
+  voiceEmptyStateEl.classList.add('hidden');
+}
 function hideVideoGridIfEmpty() {
-  if (!videoGridEl.children.length) videoGridEl.classList.add('hidden');
+  if (!videoGridEl.children.length) {
+    videoGridEl.classList.add('hidden');
+    voiceEmptyStateEl.classList.remove('hidden');
+  }
 }
 
 function ensureRoomTile(peerId, label) {

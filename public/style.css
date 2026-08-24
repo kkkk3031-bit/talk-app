@@ -97,6 +97,16 @@ body {
 }
 .sidebar li:hover { background: #35373c; color: #fff; }
 .sidebar li.active { background: #404249; color: #fff; }
+.nav-item {
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #949ba4;
+  font-size: 14px;
+  margin-bottom: 6px;
+}
+.nav-item:hover { background: #35373c; color: #fff; }
+.nav-item.active { background: #404249; color: #fff; }
 .sidebar li.presence { cursor: default; }
 .sidebar li.presence:hover { background: none; color: #949ba4; }
 .sidebar li.presence .dot {
@@ -127,10 +137,22 @@ body {
   color: #fff;
   flex-shrink: 0;
 }
+#text-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
 .messages {
   flex: 1;
   overflow-y: auto;
   padding: 16px;
+}
+#voice-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 .video-grid {
   display: flex;
@@ -139,11 +161,31 @@ body {
   align-content: flex-start;
   gap: 16px;
   padding: 20px 16px;
-  flex-shrink: 0;
-  max-height: 65vh;
+  flex: 1;
   overflow-y: auto;
   background: #1e1f22;
 }
+.voice-empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: #1e1f22;
+  color: #949ba4;
+}
+.voice-empty-state p { margin: 0; font-size: 16px; }
+.voice-empty-state button {
+  background: #5865f2;
+  color: #fff;
+  border: none;
+  padding: 10px 24px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.voice-empty-state button:hover { background: #4752c4; }
 .video-tile {
   position: relative;
   width: 360px;

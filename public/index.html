@@ -23,6 +23,7 @@
       <ul id="channel-list"></ul>
       <div class="section-title">Voice</div>
       <div id="voice-controls">
+        <div id="voice-room-nav" class="nav-item active">🔊 Voice Room</div>
         <button id="voice-toggle-btn">Join Voice</button>
         <div id="voice-media-controls" class="hidden">
           <button id="camera-toggle-btn" class="icon-btn" title="Turn on camera">📷</button>
@@ -41,18 +42,26 @@
     <main class="main">
       <header class="channel-header">
         <button id="sidebar-toggle-btn" class="icon-btn sidebar-toggle" title="Channels">☰</button>
-        #<span id="current-channel">general</span>
+        <span id="main-header-text">🔊 Voice Room</span>
       </header>
-      <div id="video-grid" class="video-grid hidden"></div>
-      <div id="messages" class="messages"></div>
-      <div id="typing-indicator" class="typing-indicator"></div>
-      <div id="attachment-preview" class="attachment-preview hidden"></div>
-      <form id="message-form" class="message-form">
-        <button type="button" id="attach-btn" class="icon-btn" title="Attach file or image">📎</button>
-        <input id="file-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,application/zip,application/msword" hidden />
-        <input id="message-input" dir="auto" placeholder="Message #general" autocomplete="off" />
-        <button type="submit">Send</button>
-      </form>
+      <div id="voice-view">
+        <div id="video-grid" class="video-grid hidden"></div>
+        <div id="voice-empty-state" class="voice-empty-state">
+          <p>Nobody's here yet.</p>
+          <button id="voice-empty-join-btn">Join Voice</button>
+        </div>
+      </div>
+      <div id="text-view" class="hidden">
+        <div id="messages" class="messages"></div>
+        <div id="typing-indicator" class="typing-indicator"></div>
+        <div id="attachment-preview" class="attachment-preview hidden"></div>
+        <form id="message-form" class="message-form">
+          <button type="button" id="attach-btn" class="icon-btn" title="Attach file or image">📎</button>
+          <input id="file-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,application/zip,application/msword" hidden />
+          <input id="message-input" dir="auto" placeholder="Message #general" autocomplete="off" />
+          <button type="submit">Send</button>
+        </form>
+      </div>
     </main>
   </div>
 
