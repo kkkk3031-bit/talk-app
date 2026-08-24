@@ -53,6 +53,15 @@ function saveHistory() {
 // socket.id -> { username, channel, inVoice }
 const users = new Map();
 
+// strip server-internal ownership tracking before a message ever reaches a client
+function publicMsg(m) {
+  const { ownerId, ...rest } = m;
+  return rest;
+}
+function publicHistory(list) {
+  return (list || []).map(publicMsg);
+}
+
 function broadcastPresence() {
   const list = [...users.values()].map((u) => ({ username: u.username, inVoice: u.inVoice }));
   io.emit('presence', list);
@@ -66,8 +75,10 @@ io.on('connection', (socket) => {
   socket.on('join', (username) => {
     username = String(username || '').trim().slice(0, 24) || `guest-${socket.id.slice(0, 4)}`;
     users.set(socket.id, { username, channel: 'general', inVoice: false });
-    socket.join('general');
-    socket.emit('joined', { username, channels: CHANNELS, history: history['general'] || [] });
+    // join every text channel's room so unread messages in channels the user
+    // isn't currently viewing still reach the client (for unread badges)
+    CHANNELS.forEach((c) => socket.join(c));
+    socket.emit('joined', { username, channels: CHANNELS, history: publicHistory(history['general']) });
     broadcastPresence();
     console.log(`[join] ${socket.id} -> "${username}"`);
   });
@@ -75,10 +86,8 @@ io.on('connection', (socket) => {
   socket.on('switch-channel', (channel) => {
     const u = users.get(socket.id);
     if (!u || !CHANNELS.includes(channel)) return;
-    socket.leave(u.channel);
-    u.channel = channel;
-    socket.join(channel);
-    socket.emit('channel-history', { channel, history: history[channel] || [] });
+    u.channel = channel; // sockets stay joined to every channel room; this just tracks where new messages/typing go
+    socket.emit('channel-history', { channel, history: publicHistory(history[channel]) });
   });
 
   socket.on('chat-message', (text) => {
@@ -89,12 +98,30 @@ io.on('connection', (socket) => {
       username: u.username,
       text: String(text).slice(0, 2000),
       ts: Date.now(),
+      ownerId: socket.id, // stripped before broadcast; server-side ownership check for delete
     };
     history[u.channel] = history[u.channel] || [];
     history[u.channel].push(msg);
     if (history[u.channel].length > 200) history[u.channel].shift();
     saveHistory();
-    io.to(u.channel).emit('chat-message', { channel: u.channel, msg });
+    io.to(u.channel).emit('chat-message', { channel: u.channel, msg: publicMsg(msg) });
+  });
+
+  socket.on('delete-message', ({ channel, id }) => {
+    const u = users.get(socket.id);
+    if (!u || !CHANNELS.includes(channel)) return;
+    const list = history[channel] || [];
+    const idx = list.findIndex((m) => m.id === id);
+    if (idx === -1 || list[idx].ownerId !== socket.id) return;
+    list.splice(idx, 1);
+    saveHistory();
+    io.to(channel).emit('message-deleted', { channel, id });
+  });
+
+  socket.on('typing', () => {
+    const u = users.get(socket.id);
+    if (!u) return;
+    socket.to(u.channel).emit('typing', { channel: u.channel, username: u.username });
   });
 
   // --- WebRTC signaling relay for peer-to-peer voice (mesh) ---

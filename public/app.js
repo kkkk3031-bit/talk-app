@@ -133,13 +133,20 @@ function stopVAD() {
 
 function go(fn) { document.readyState === 'loading' ? document.addEventListener('DOMContentLoaded', fn) : fn(); }
 
-function renderMessage({ username, text, ts }, system = false) {
+function renderMessage({ id, username, text, ts }, system = false) {
   const div = document.createElement('div');
   div.className = 'message' + (system ? ' system' : '');
+  if (id) div.dataset.id = id;
   const time = new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const mine = !system && username === myUsername;
   div.innerHTML = system
     ? `<span class="text">${escapeHtml(text)}</span>`
-    : `<span class="author">${escapeHtml(username)}</span><span class="time">${time}</span><br/><span class="text">${escapeHtml(text)}</span>`;
+    : `<span class="author">${escapeHtml(username)}</span><span class="time">${time}</span>${mine ? '<button class="delete-btn" title="Delete">🗑</button>' : ''}<br/><span class="text">${escapeHtml(text)}</span>`;
+  if (mine) {
+    div.querySelector('.delete-btn').addEventListener('click', () => {
+      socket.emit('delete-message', { channel: currentChannel, id });
+    });
+  }
   messagesEl.appendChild(div);
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
@@ -168,6 +175,10 @@ function renderChannelList(channels) {
       currentChannelEl.textContent = c;
       messageInput.placeholder = `Message #${c}`;
       [...channelList.children].forEach((el) => el.classList.toggle('active', el.dataset.channel === c));
+      unreadCounts[c] = 0;
+      renderChannelBadge(li, c);
+      typingUsers.clear();
+      renderTyping();
       socket.emit('switch-channel', c);
     });
     channelList.appendChild(li);
@@ -212,8 +223,17 @@ socket.on('channel-history', ({ channel, history }) => {
 });
 
 socket.on('chat-message', ({ channel, msg }) => {
-  if (channel !== currentChannel) return;
+  if (channel !== currentChannel) {
+    bumpUnread(channel);
+    return;
+  }
   renderMessage(msg);
+});
+
+socket.on('message-deleted', ({ channel, id }) => {
+  if (channel !== currentChannel) return;
+  const el = messagesEl.querySelector(`[data-id="${CSS.escape(id)}"]`);
+  if (el) el.remove();
 });
 
 socket.on('presence', renderPresence);
@@ -225,6 +245,55 @@ messageForm.addEventListener('submit', (e) => {
   socket.emit('chat-message', text);
   messageInput.value = '';
 });
+
+// --- typing indicator ---
+let typingEmitThrottle = 0;
+messageInput.addEventListener('input', () => {
+  const now = Date.now();
+  if (now - typingEmitThrottle < 2000) return;
+  typingEmitThrottle = now;
+  socket.emit('typing');
+});
+
+const typingIndicatorEl = document.getElementById('typing-indicator');
+const typingUsers = new Map(); // username -> timeout id
+socket.on('typing', ({ channel, username }) => {
+  if (channel !== currentChannel) return;
+  if (typingUsers.has(username)) clearTimeout(typingUsers.get(username));
+  typingUsers.set(username, setTimeout(() => {
+    typingUsers.delete(username);
+    renderTyping();
+  }, 3000));
+  renderTyping();
+});
+function renderTyping() {
+  const names = [...typingUsers.keys()];
+  if (names.length === 0) typingIndicatorEl.textContent = '';
+  else if (names.length === 1) typingIndicatorEl.textContent = `${names[0]} is typing…`;
+  else typingIndicatorEl.textContent = `${names.join(', ')} are typing…`;
+}
+
+// --- unread badges on other channels ---
+const unreadCounts = {};
+function bumpUnread(channel) {
+  unreadCounts[channel] = (unreadCounts[channel] || 0) + 1;
+  const li = channelList.querySelector(`[data-channel="${CSS.escape(channel)}"]`);
+  if (li) renderChannelBadge(li, channel);
+}
+function renderChannelBadge(li, channel) {
+  let badge = li.querySelector('.unread-badge');
+  const count = unreadCounts[channel] || 0;
+  if (count === 0) {
+    if (badge) badge.remove();
+    return;
+  }
+  if (!badge) {
+    badge = document.createElement('span');
+    badge.className = 'unread-badge';
+    li.appendChild(badge);
+  }
+  badge.textContent = count > 99 ? '99+' : String(count);
+}
 
 // --- WebRTC voice (P2P mesh) ---
 
@@ -245,9 +314,23 @@ function removeAudioEl(peerId) {
   if (el) el.remove();
 }
 
+const VOICE_MAX_BITRATE = 64000; // bump above Opus's default ~32kbps mono for clearer voice
+
+async function boostBitrate(sender) {
+  const params = sender.getParameters();
+  if (!params.encodings) params.encodings = [{}];
+  params.encodings[0].maxBitrate = VOICE_MAX_BITRATE;
+  try { await sender.setParameters(params); } catch {}
+}
+
 function createPeerConnection(peerId) {
   const pc = new RTCPeerConnection(rtcConfig);
-  if (localStream) localStream.getTracks().forEach((t) => pc.addTrack(t, localStream));
+  if (localStream) {
+    localStream.getTracks().forEach((t) => {
+      const sender = pc.addTrack(t, localStream);
+      boostBitrate(sender);
+    });
+  }
   pc.onicecandidate = (e) => {
     if (e.candidate) socket.emit('voice-signal', { to: peerId, signal: { type: 'ice', candidate: e.candidate } });
   };
@@ -305,7 +388,13 @@ function renderVoiceParticipant(id, username) {
 voiceToggleBtn.addEventListener('click', async () => {
   if (!inVoice) {
     try {
-      const audioConstraint = settings.micId ? { deviceId: { exact: settings.micId } } : true;
+      const audioConstraint = {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        channelCount: 1,
+      };
+      if (settings.micId) audioConstraint.deviceId = { exact: settings.micId };
       localStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraint });
     } catch (err) {
       alert('Microphone access denied or unavailable: ' + err.message);
