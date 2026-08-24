@@ -1,7 +1,28 @@
+/* Cairo: modern, bold-friendly, native Arabic + Latin glyph coverage.
+   Self-hosted (no external CDN request) as a single variable-weight file
+   per script; unicode-range means a browser only fetches the Arabic file
+   when Arabic text is actually rendered. */
+@font-face {
+  font-family: 'Cairo';
+  font-style: normal;
+  font-weight: 400 900;
+  font-display: swap;
+  src: url('/fonts/cairo-arabic.woff2') format('woff2');
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891, U+0897-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC;
+}
+@font-face {
+  font-family: 'Cairo';
+  font-style: normal;
+  font-weight: 400 900;
+  font-display: swap;
+  src: url('/fonts/cairo-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC, U+2122;
+}
+
 * { box-sizing: border-box; }
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: 'Cairo', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   background: #313338;
   color: #dbdee1;
   height: 100vh;
@@ -158,6 +179,7 @@ body {
   color: #dbdee1;
   white-space: pre-wrap;
   word-break: break-word;
+  unicode-bidi: plaintext; /* each message renders RTL/LTR based on its own content (mixed Arabic/English chat) */
 }
 .message.system .text { color: #949ba4; font-style: italic; }
 .message { position: relative; }
@@ -339,3 +361,46 @@ body {
   font-weight: 600;
 }
 .modal-actions button:hover { background: #4752c4; }
+
+.sidebar-toggle { display: none; margin-right: 8px; font-size: 18px; }
+.sidebar-overlay { display: none; }
+
+/* --- mobile layout: off-canvas sidebar, full-width main, bigger tap targets --- */
+@media (max-width: 768px) {
+  .sidebar-toggle { display: flex; }
+
+  .sidebar {
+    position: fixed;
+    inset: 0 25% 0 0;
+    z-index: 90;
+    width: auto;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    box-shadow: 2px 0 12px rgba(0, 0, 0, 0.4);
+  }
+  .sidebar.open { transform: translateX(0); }
+
+  .sidebar-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 80;
+  }
+  .sidebar-overlay.hidden { display: none; }
+
+  #app-screen { position: relative; }
+  .main { width: 100%; }
+
+  /* iOS Safari zooms the page in on any input with font-size below 16px */
+  .message-form input, .login-box input, #mic-select { font-size: 16px; }
+
+  .icon-btn { width: 36px; height: 36px; font-size: 18px; }
+
+  .video-grid { max-height: 35vh; }
+  .video-tile { width: 44vw; }
+
+  .attachment-img { max-width: 70vw; }
+
+  .modal-box { padding: 20px; }
+}

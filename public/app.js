@@ -22,6 +22,9 @@ const userBarAvatar = document.getElementById('user-bar-avatar');
 const userBarName = document.getElementById('user-bar-name');
 const muteMicBtn = document.getElementById('mute-mic-btn');
 const settingsBtn = document.getElementById('settings-btn');
+const sidebarToggleBtn = document.getElementById('sidebar-toggle-btn');
+const sidebarOverlayEl = document.getElementById('sidebar-overlay');
+const sidebarEl = document.querySelector('.sidebar');
 const settingsModal = document.getElementById('settings-modal');
 const settingsCloseBtn = document.getElementById('settings-close-btn');
 const micSelect = document.getElementById('mic-select');
@@ -202,10 +205,24 @@ function renderChannelList(channels) {
       typingUsers.clear();
       renderTyping();
       socket.emit('switch-channel', c);
+      closeSidebar();
     });
     channelList.appendChild(li);
   });
 }
+
+function openSidebar() {
+  sidebarEl.classList.add('open');
+  sidebarOverlayEl.classList.remove('hidden');
+}
+function closeSidebar() {
+  sidebarEl.classList.remove('open');
+  sidebarOverlayEl.classList.add('hidden');
+}
+sidebarToggleBtn.addEventListener('click', () => {
+  sidebarEl.classList.contains('open') ? closeSidebar() : openSidebar();
+});
+sidebarOverlayEl.addEventListener('click', closeSidebar);
 
 function renderPresence(list) {
   presenceList.innerHTML = '';

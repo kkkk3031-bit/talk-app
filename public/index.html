@@ -11,12 +11,13 @@
     <div class="login-box">
       <h1>talk-app</h1>
       <p>Pick a display name to join.</p>
-      <input id="username-input" placeholder="Display name" maxlength="24" autofocus />
+      <input id="username-input" dir="auto" placeholder="Display name" maxlength="24" autofocus />
       <button id="join-btn">Join</button>
     </div>
   </div>
 
   <div id="app-screen" class="hidden">
+    <div id="sidebar-overlay" class="sidebar-overlay hidden"></div>
     <aside class="sidebar">
       <div class="section-title">Text Channels</div>
       <ul id="channel-list"></ul>
@@ -39,7 +40,10 @@
       </div>
     </aside>
     <main class="main">
-      <header class="channel-header">#<span id="current-channel">general</span></header>
+      <header class="channel-header">
+        <button id="sidebar-toggle-btn" class="icon-btn sidebar-toggle" title="Channels">☰</button>
+        #<span id="current-channel">general</span>
+      </header>
       <div id="video-grid" class="video-grid hidden"></div>
       <div id="messages" class="messages"></div>
       <div id="typing-indicator" class="typing-indicator"></div>
@@ -47,7 +51,7 @@
       <form id="message-form" class="message-form">
         <button type="button" id="attach-btn" class="icon-btn" title="Attach file or image">📎</button>
         <input id="file-input" type="file" accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,application/zip,application/msword" hidden />
-        <input id="message-input" placeholder="Message #general" autocomplete="off" />
+        <input id="message-input" dir="auto" placeholder="Message #general" autocomplete="off" />
         <button type="submit">Send</button>
       </form>
     </main>

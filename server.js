@@ -4,9 +4,11 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const multer = require('multer');
+const compression = require('compression');
 const { Server } = require('socket.io');
 
 const app = express();
+app.use(compression()); // gzip text responses (JS/CSS/HTML/JSON) — big win on mobile connections
 const server = http.createServer(app);
 const io = new Server(server);
 
@@ -79,8 +81,12 @@ function publicMsg(m) {
   const { ownerId, ...rest } = m;
   return rest;
 }
+// server keeps up to 200 messages per channel for backlog, but only the most
+// recent 50 are sent on initial load — cuts join/switch-channel payload size
+// substantially, which matters most on mobile connections
+const HISTORY_PAGE_SIZE = 50;
 function publicHistory(list) {
-  return (list || []).map(publicMsg);
+  return (list || []).slice(-HISTORY_PAGE_SIZE).map(publicMsg);
 }
 
 function broadcastPresence() {
