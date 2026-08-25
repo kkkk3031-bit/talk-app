@@ -456,7 +456,8 @@ function removeRoomTile(peerId) {
 
 function setTileVideo(peerId, label, stream, { muted = false, mirror = false } = {}) {
   const tile = ensureRoomTile(peerId, label);
-  tile.querySelector('.room-avatar')?.remove();
+  const existingAvatar = tile.querySelector('.room-avatar');
+  if (existingAvatar) existingAvatar.remove();
   let video = tile.querySelector('video');
   if (!video) {
     video = document.createElement('video');
