@@ -547,12 +547,17 @@ body {
     z-index: 95; /* must stay above the open sidebar (90) so it's still reachable to close */
   }
 
-  #server-rail { width: 56px; }
+  #server-rail { width: 56px; position: relative; z-index: 96; } /* stay above the sidebar-open overlay (80) so it's always usable */
   #server-rail .server-icon { width: 40px; height: 40px; font-size: 15px; }
 
   .sidebar {
     position: fixed;
-    top: 0; right: 25%; bottom: 0; left: 56px;
+    /* left:0 (not 56px) so translateX(-100%) — which is always relative to
+       the element's OWN width — fully clears the screen including the
+       server rail's column when closed; the rail sits at z-index above it
+       anyway, but a left:56px base here would leave the closed sidebar's
+       right edge pinned exactly at x=56, permanently overlapping the rail. */
+    top: 0; right: 25%; bottom: 0; left: 0;
     z-index: 90;
     width: auto;
     transform: translateX(-100%);
@@ -560,7 +565,7 @@ body {
     box-shadow: 2px 0 12px rgba(0, 0, 0, 0.4);
     pointer-events: none; /* belt-and-suspenders: translated-offscreen shouldn't intercept touches, but don't rely on that alone */
   }
-  .sidebar.open { transform: translateX(0); pointer-events: auto; }
+  .sidebar.open { transform: translateX(56px); pointer-events: auto; }
 
   .sidebar-overlay {
     display: block;
