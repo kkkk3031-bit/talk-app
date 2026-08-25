@@ -70,6 +70,35 @@ body {
   display: flex;
   height: 100vh;
 }
+#server-rail {
+  width: 72px;
+  background: #1e1f22;
+  flex-shrink: 0;
+  padding: 12px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  overflow-y: auto;
+}
+#server-rail-list { display: flex; flex-direction: column; gap: 8px; align-items: center; }
+.server-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: #313338;
+  color: #dbdee1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 18px;
+  cursor: pointer;
+  transition: border-radius 0.15s ease, background 0.15s ease;
+}
+.server-icon:hover { border-radius: 16px; background: #5865f2; color: #fff; }
+.server-icon.active { border-radius: 16px; background: #5865f2; color: #fff; }
+.server-add { font-size: 24px; }
 .sidebar {
   width: 240px;
   background: #2b2d31;
@@ -422,6 +451,90 @@ body {
   font-weight: 600;
 }
 .modal-actions button:hover { background: #4752c4; }
+.modal-row { display: flex; gap: 8px; align-items: center; }
+.modal-row input, .modal-row select { flex: 1; }
+.modal-row button {
+  background: #5865f2;
+  color: #fff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.modal-row button:hover { background: #4752c4; }
+.modal-error { color: #da373c; font-size: 13px; margin-top: 6px; }
+.avatar-row { margin-top: 6px; }
+.avatar-preview { width: 56px; height: 56px; font-size: 22px; flex-shrink: 0; }
+#create-server-input, #display-name-input {
+  padding: 8px 12px;
+  border-radius: 4px;
+  border: none;
+  background: #1e1f22;
+  color: #fff;
+}
+
+/* --- friends view --- */
+#friends-view, #dm-view { padding: 16px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.friends-section { margin-bottom: 24px; }
+.friends-heading {
+  font-size: 12px;
+  text-transform: uppercase;
+  color: #949ba4;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+.add-friend-form { display: flex; gap: 8px; }
+.add-friend-form input {
+  flex: 1;
+  padding: 10px 12px;
+  border-radius: 4px;
+  border: none;
+  background: #1e1f22;
+  color: #fff;
+}
+.add-friend-form button {
+  background: #5865f2;
+  color: #fff;
+  border: none;
+  padding: 10px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.friends-list { list-style: none; margin: 0; padding: 0; }
+.friend-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 6px;
+  background: #2b2d31;
+  margin-bottom: 6px;
+}
+.friend-row span { flex: 1; color: #dbdee1; }
+.friend-name-clickable { cursor: pointer; }
+.friend-name-clickable:hover { text-decoration: underline; }
+.friend-avatar { width: 32px; height: 32px; font-size: 13px; flex-shrink: 0; }
+.friend-row button {
+  background: #5865f2;
+  color: #fff;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+.friend-row .friend-decline-btn { background: #3a3c42; }
+.friend-row .friend-decline-btn:hover { background: #da373c; }
+.member-count { color: #949ba4; font-size: 12px; }
+.friends-empty { color: #949ba4; font-size: 13px; list-style: none; }
+
+#dm-view #dm-messages { flex: 1; overflow-y: auto; padding: 0 0 16px; }
+#dm-view #dm-form { padding: 0; }
 
 .sidebar-toggle { display: none; margin-right: 8px; font-size: 18px; }
 .sidebar-overlay { display: none; }
@@ -434,9 +547,12 @@ body {
     z-index: 95; /* must stay above the open sidebar (90) so it's still reachable to close */
   }
 
+  #server-rail { width: 56px; }
+  #server-rail .server-icon { width: 40px; height: 40px; font-size: 15px; }
+
   .sidebar {
     position: fixed;
-    top: 0; right: 25%; bottom: 0; left: 0;
+    top: 0; right: 25%; bottom: 0; left: 56px;
     z-index: 90;
     width: auto;
     transform: translateX(-100%);

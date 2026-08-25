@@ -34,9 +34,39 @@ const settingsCloseBtn = document.getElementById('settings-close-btn');
 const micSelect = document.getElementById('mic-select');
 const volumeSlider = document.getElementById('volume-slider');
 const volumeValueEl = document.getElementById('volume-value');
+const displayNameInput = document.getElementById('display-name-input');
+const saveNameBtn = document.getElementById('save-name-btn');
+const renameErrorEl = document.getElementById('rename-error');
+const avatarPreviewEl = document.getElementById('avatar-preview');
+const avatarUploadBtn = document.getElementById('avatar-upload-btn');
+const avatarFileInput = document.getElementById('avatar-file-input');
+
+const serverRailListEl = document.getElementById('server-rail-list');
+const serverAddBtn = document.getElementById('server-add-btn');
+const serverModal = document.getElementById('server-modal');
+const serverModalCloseBtn = document.getElementById('server-modal-close-btn');
+const createServerInput = document.getElementById('create-server-input');
+const createServerBtn = document.getElementById('create-server-btn');
+const browseServerListEl = document.getElementById('browse-server-list');
+
+const friendsNavEl = document.getElementById('friends-nav');
+const friendsViewEl = document.getElementById('friends-view');
+const addFriendForm = document.getElementById('add-friend-form');
+const addFriendInput = document.getElementById('add-friend-input');
+const incomingRequestsListEl = document.getElementById('incoming-requests-list');
+const friendsListEl = document.getElementById('friends-list');
+
+const dmViewEl = document.getElementById('dm-view');
+const dmMessagesEl = document.getElementById('dm-messages');
+const dmForm = document.getElementById('dm-form');
+const dmInput = document.getElementById('dm-input');
 
 let myUsername = null;
+let currentServerId = 'home';
 let currentChannel = 'general';
+let currentDmUser = null;
+const knownProfiles = new Map(); // username -> { username, avatarUrl }
+const myServers = new Map(); // serverId -> { id, name, channels }
 let inVoice = false;
 let micMuted = false;
 let localStream = null;
@@ -83,10 +113,51 @@ micSelect.addEventListener('change', () => { settings.micId = micSelect.value; s
 
 settingsBtn.addEventListener('click', async () => {
   settingsModal.classList.remove('hidden');
+  displayNameInput.value = myUsername;
+  renameErrorEl.classList.add('hidden');
+  applyAvatar(avatarPreviewEl, myUsername);
   try { await populateMicList(); } catch {}
 });
 settingsCloseBtn.addEventListener('click', () => settingsModal.classList.add('hidden'));
 settingsModal.addEventListener('click', (e) => { if (e.target === settingsModal) settingsModal.classList.add('hidden'); });
+
+// --- profile: rename ---
+saveNameBtn.addEventListener('click', () => {
+  const name = displayNameInput.value.trim();
+  if (!name || name === myUsername) return;
+  socket.emit('rename', name);
+});
+socket.on('renamed', (newUsername) => {
+  myUsername = newUsername;
+  userBarName.textContent = newUsername;
+  applyAvatar(userBarAvatar, newUsername);
+  renameErrorEl.classList.add('hidden');
+});
+socket.on('rename-failed', (message) => {
+  renameErrorEl.textContent = message;
+  renameErrorEl.classList.remove('hidden');
+});
+
+// --- profile: avatar upload ---
+avatarUploadBtn.addEventListener('click', () => avatarFileInput.click());
+avatarFileInput.addEventListener('change', async () => {
+  const file = avatarFileInput.files[0];
+  avatarFileInput.value = '';
+  if (!file) return;
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch('/api/upload', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Upload failed');
+    socket.emit('set-avatar', data.url);
+    rememberProfile({ username: myUsername, avatarUrl: data.url });
+    applyAvatar(avatarPreviewEl, myUsername);
+    applyAvatar(userBarAvatar, myUsername);
+  } catch (err) {
+    alert('Avatar upload failed: ' + err.message);
+  }
+});
 
 muteMicBtn.addEventListener('click', () => {
   if (!localStream) return;
@@ -174,7 +245,7 @@ function renderMessage({ id, username, text, attachment, ts }, system = false) {
     : `<span class="author">${escapeHtml(username)}</span><span class="time">${time}</span>${mine ? '<button class="delete-btn" title="Delete">🗑</button>' : ''}${textHtml}${attHtml}`;
   if (mine) {
     div.querySelector('.delete-btn').addEventListener('click', () => {
-      socket.emit('delete-message', { channel: currentChannel, id });
+      socket.emit('delete-message', { serverId: currentServerId, channel: currentChannel, id });
     });
   }
   messagesEl.appendChild(div);
@@ -186,6 +257,26 @@ function avatarColor(name) {
   let hash = 0;
   for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
   return AVATAR_COLORS[hash % AVATAR_COLORS.length];
+}
+
+function rememberProfile(p) {
+  if (p && p.username) knownProfiles.set(p.username, p);
+}
+
+// applies either an uploaded photo or the letter-avatar fallback to any .avatar element
+function applyAvatar(el, username) {
+  const p = knownProfiles.get(username);
+  el.style.background = ''; // clear the shorthand first — setting it after the image longhands resets them back out
+  if (p && p.avatarUrl) {
+    el.style.backgroundImage = `url('${p.avatarUrl}')`;
+    el.style.backgroundSize = 'cover';
+    el.style.backgroundPosition = 'center';
+    el.textContent = '';
+  } else {
+    el.style.backgroundImage = '';
+    el.style.background = avatarColor(username);
+    el.textContent = username.slice(0, 1).toUpperCase();
+  }
 }
 
 function escapeHtml(s) {
@@ -206,7 +297,7 @@ function renderChannelList(channels) {
       renderChannelBadge(li, c);
       typingUsers.clear();
       renderTyping();
-      socket.emit('switch-channel', c);
+      socket.emit('switch-channel', { serverId: currentServerId, channel: c });
       setMainView('text');
       closeSidebar();
     });
@@ -214,19 +305,227 @@ function renderChannelList(channels) {
   });
 }
 
-// --- main view: land on the Voice room after login; text channels are opt-in ---
+// --- main view: land on the Voice room after login; everything else is opt-in ---
 let mainView = 'voice';
 function setMainView(view) {
   mainView = view;
-  const inText = view === 'text';
-  textViewEl.classList.toggle('hidden', !inText);
-  voiceViewEl.classList.toggle('hidden', inText);
-  voiceRoomNavEl.classList.toggle('active', !inText);
-  [...channelList.children].forEach((el) => el.classList.toggle('active', inText && el.dataset.channel === currentChannel));
-  mainHeaderTextEl.textContent = inText ? `# ${currentChannel}` : '🔊 Voice Room';
+  const isText = view === 'text';
+  const isVoice = view === 'voice';
+  const isFriends = view === 'friends';
+  const isDm = view === 'dm';
+  textViewEl.classList.toggle('hidden', !isText);
+  voiceViewEl.classList.toggle('hidden', !isVoice);
+  friendsViewEl.classList.toggle('hidden', !isFriends);
+  dmViewEl.classList.toggle('hidden', !isDm);
+  voiceRoomNavEl.classList.toggle('active', isVoice);
+  friendsNavEl.classList.toggle('active', isFriends);
+  [...channelList.children].forEach((el) => el.classList.toggle('active', isText && el.dataset.channel === currentChannel));
+  if (isText) mainHeaderTextEl.textContent = `# ${currentChannel}`;
+  else if (isVoice) mainHeaderTextEl.textContent = '🔊 Voice Room';
+  else if (isFriends) mainHeaderTextEl.textContent = '👥 Friends';
+  else if (isDm) mainHeaderTextEl.textContent = `@${currentDmUser}`;
 }
 voiceRoomNavEl.addEventListener('click', () => { setMainView('voice'); closeSidebar(); });
 voiceEmptyJoinBtn.addEventListener('click', () => voiceToggleBtn.click());
+friendsNavEl.addEventListener('click', () => { setMainView('friends'); closeSidebar(); });
+
+// --- servers (Discord-style: your own server rail on the left) ---
+let latestServerDirectory = [];
+
+function renderServerRail() {
+  serverRailListEl.innerHTML = '';
+  myServers.forEach((s) => {
+    const el = document.createElement('div');
+    el.className = 'server-icon' + (s.id === currentServerId ? ' active' : '');
+    el.textContent = s.name.slice(0, 1).toUpperCase();
+    el.title = s.name;
+    el.dataset.serverId = s.id;
+    el.addEventListener('click', () => switchServer(s.id));
+    serverRailListEl.appendChild(el);
+  });
+}
+
+function switchServer(serverId) {
+  const s = myServers.get(serverId);
+  if (!s) return;
+  currentServerId = serverId;
+  currentChannel = s.channels[0];
+  renderServerRail();
+  renderChannelList(s.channels);
+  socket.emit('switch-channel', { serverId, channel: currentChannel });
+  setMainView('text');
+  closeSidebar();
+}
+
+socket.on('server-created', (s) => {
+  myServers.set(s.id, s);
+  renderServerRail();
+  switchServer(s.id);
+  serverModal.classList.add('hidden');
+});
+
+socket.on('server-joined', (s) => {
+  myServers.set(s.id, s);
+  renderServerRail();
+  switchServer(s.id);
+  serverModal.classList.add('hidden');
+});
+
+socket.on('server-list', (list) => {
+  latestServerDirectory = list;
+  renderBrowseServerList();
+});
+
+function renderBrowseServerList() {
+  browseServerListEl.innerHTML = '';
+  latestServerDirectory.filter((s) => !myServers.has(s.id)).forEach((s) => {
+    const li = document.createElement('li');
+    li.className = 'friend-row';
+    li.innerHTML = `<span>${escapeHtml(s.name)} <span class="member-count">(${s.memberCount} member${s.memberCount === 1 ? '' : 's'})</span></span>`;
+    const joinBtn = document.createElement('button');
+    joinBtn.textContent = 'Join';
+    joinBtn.addEventListener('click', () => socket.emit('join-server', s.id));
+    li.appendChild(joinBtn);
+    browseServerListEl.appendChild(li);
+  });
+  if (!browseServerListEl.children.length) {
+    browseServerListEl.innerHTML = '<li class="friends-empty">No other servers yet — create one!</li>';
+  }
+}
+
+serverAddBtn.addEventListener('click', () => {
+  serverModal.classList.remove('hidden');
+  socket.emit('list-servers');
+});
+serverModalCloseBtn.addEventListener('click', () => serverModal.classList.add('hidden'));
+serverModal.addEventListener('click', (e) => { if (e.target === serverModal) serverModal.classList.add('hidden'); });
+createServerBtn.addEventListener('click', () => {
+  const name = createServerInput.value.trim();
+  if (!name) return;
+  socket.emit('create-server', name);
+  createServerInput.value = '';
+});
+
+// --- friends ---
+let myFriends = [];
+let myIncoming = [];
+let myOutgoing = [];
+
+function refreshFriendsView() {
+  incomingRequestsListEl.innerHTML = '';
+  myIncoming.forEach((username) => {
+    const li = document.createElement('li');
+    li.className = 'friend-row';
+    const avatar = document.createElement('div');
+    avatar.className = 'avatar friend-avatar';
+    applyAvatar(avatar, username);
+    const label = document.createElement('span');
+    label.textContent = username;
+    const acceptBtn = document.createElement('button');
+    acceptBtn.textContent = 'Accept';
+    acceptBtn.addEventListener('click', () => socket.emit('friend-accept', username));
+    const declineBtn = document.createElement('button');
+    declineBtn.textContent = 'Decline';
+    declineBtn.className = 'friend-decline-btn';
+    declineBtn.addEventListener('click', () => socket.emit('friend-decline', username));
+    li.append(avatar, label, acceptBtn, declineBtn);
+    incomingRequestsListEl.appendChild(li);
+  });
+  if (!myIncoming.length) incomingRequestsListEl.innerHTML = '<li class="friends-empty">No pending requests.</li>';
+
+  friendsListEl.innerHTML = '';
+  myFriends.forEach((f) => {
+    const username = f.username || f;
+    const li = document.createElement('li');
+    li.className = 'friend-row';
+    const avatar = document.createElement('div');
+    avatar.className = 'avatar friend-avatar';
+    applyAvatar(avatar, username);
+    const label = document.createElement('span');
+    label.textContent = username;
+    label.className = 'friend-name-clickable';
+    label.addEventListener('click', () => openDm(username));
+    const removeBtn = document.createElement('button');
+    removeBtn.textContent = 'Remove';
+    removeBtn.className = 'friend-decline-btn';
+    removeBtn.addEventListener('click', () => socket.emit('friend-remove', username));
+    li.append(avatar, label, removeBtn);
+    friendsListEl.appendChild(li);
+  });
+  if (!myFriends.length) friendsListEl.innerHTML = '<li class="friends-empty">No friends yet — add one above.</li>';
+}
+
+addFriendForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const name = addFriendInput.value.trim();
+  if (!name) return;
+  socket.emit('friend-request', name);
+  addFriendInput.value = '';
+});
+
+socket.on('friend-request-received', (profile) => {
+  rememberProfile(profile);
+  if (!myIncoming.includes(profile.username)) myIncoming.push(profile.username);
+  refreshFriendsView();
+});
+
+socket.on('friend-added', (profile) => {
+  rememberProfile(profile);
+  myIncoming = myIncoming.filter((n) => n !== profile.username);
+  myOutgoing = myOutgoing.filter((n) => n !== profile.username);
+  if (!myFriends.some((f) => (f.username || f) === profile.username)) myFriends.push(profile);
+  refreshFriendsView();
+});
+
+socket.on('friend-incoming-removed', (username) => {
+  myIncoming = myIncoming.filter((n) => n !== username);
+  refreshFriendsView();
+});
+
+socket.on('friend-outgoing-added', (username) => {
+  myOutgoing.push(username);
+});
+
+socket.on('friend-removed', (username) => {
+  myFriends = myFriends.filter((f) => (f.username || f) !== username);
+  refreshFriendsView();
+});
+
+// --- direct messages ---
+function openDm(username) {
+  currentDmUser = username;
+  dmMessagesEl.innerHTML = '';
+  socket.emit('dm-history', username);
+  setMainView('dm');
+}
+
+socket.on('dm-history', ({ withUser, history }) => {
+  if (withUser !== currentDmUser) return;
+  dmMessagesEl.innerHTML = '';
+  history.forEach((m) => renderDmMessage(m));
+});
+
+socket.on('dm-message', ({ withUser, msg }) => {
+  if (withUser !== currentDmUser || mainView !== 'dm') return;
+  renderDmMessage(msg);
+});
+
+function renderDmMessage({ from, text, ts }) {
+  const div = document.createElement('div');
+  div.className = 'message';
+  const time = new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  div.innerHTML = `<span class="author">${escapeHtml(from)}</span><span class="time">${time}</span><br/><span class="text">${escapeHtml(text)}</span>`;
+  dmMessagesEl.appendChild(div);
+  dmMessagesEl.scrollTop = dmMessagesEl.scrollHeight;
+}
+
+dmForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const text = dmInput.value.trim();
+  if (!text || !currentDmUser) return;
+  socket.emit('dm-message', { to: currentDmUser, text });
+  dmInput.value = '';
+});
 
 function openSidebar() {
   sidebarEl.classList.add('open');
@@ -244,6 +543,7 @@ sidebarToggleBtn.addEventListener('click', () => {
 sidebarOverlayEl.addEventListener('click', closeSidebar);
 
 function renderPresence(list) {
+  list.forEach(rememberProfile);
   presenceList.innerHTML = '';
   list.forEach((u) => {
     const li = document.createElement('li');
@@ -252,6 +552,12 @@ function renderPresence(list) {
     presenceList.appendChild(li);
   });
 }
+
+socket.on('profile-updated', (p) => {
+  rememberProfile(p);
+  if (p.username === myUsername) applyAvatar(userBarAvatar, myUsername);
+  refreshFriendsView();
+});
 
 joinBtn.addEventListener('click', doJoin);
 usernameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doJoin(); });
@@ -262,35 +568,49 @@ function doJoin() {
   socket.emit('join', name);
 }
 
-socket.on('joined', ({ username, channels, history }) => {
+socket.on('joined', (data) => {
+  const { username, profile, servers, serverList, currentServerId: sid, channels, history, friends, incomingRequests, outgoingRequests } = data;
   myUsername = username;
+  currentServerId = sid;
+  rememberProfile({ username, avatarUrl: profile.avatarUrl });
   loginScreen.classList.add('hidden');
   appScreen.classList.remove('hidden');
   userBarName.textContent = username;
-  userBarAvatar.textContent = username.slice(0, 1).toUpperCase();
-  userBarAvatar.style.background = avatarColor(username);
+  applyAvatar(userBarAvatar, username);
+  displayNameInput.value = username;
+
+  servers.forEach((s) => myServers.set(s.id, s));
+  renderServerRail();
   renderChannelList(channels);
   messagesEl.innerHTML = '';
   history.forEach((m) => renderMessage(m));
   setMainView('voice');
+
+  myFriends = friends || [];
+  myIncoming = incomingRequests || [];
+  myOutgoing = outgoingRequests || [];
+  friends.forEach(rememberProfile);
+  refreshFriendsView();
+
+  latestServerDirectory = serverList || [];
 });
 
-socket.on('channel-history', ({ channel, history }) => {
-  if (channel !== currentChannel) return;
+socket.on('channel-history', ({ serverId, channel, history }) => {
+  if (serverId !== currentServerId || channel !== currentChannel) return;
   messagesEl.innerHTML = '';
   history.forEach((m) => renderMessage(m));
 });
 
-socket.on('chat-message', ({ channel, msg }) => {
-  if (channel !== currentChannel) {
-    bumpUnread(channel);
+socket.on('chat-message', ({ serverId, channel, msg }) => {
+  if (serverId !== currentServerId || channel !== currentChannel || mainView !== 'text') {
+    bumpUnread(serverId, channel);
     return;
   }
   renderMessage(msg);
 });
 
-socket.on('message-deleted', ({ channel, id }) => {
-  if (channel !== currentChannel) return;
+socket.on('message-deleted', ({ serverId, channel, id }) => {
+  if (serverId !== currentServerId || channel !== currentChannel) return;
   const el = messagesEl.querySelector(`[data-id="${CSS.escape(id)}"]`);
   if (el) el.remove();
 });
@@ -373,7 +693,8 @@ function renderTyping() {
 
 // --- unread badges on other channels ---
 const unreadCounts = {};
-function bumpUnread(channel) {
+function bumpUnread(serverId, channel) {
+  if (serverId !== currentServerId) return; // only the visible server's sidebar has these channels rendered
   unreadCounts[channel] = (unreadCounts[channel] || 0) + 1;
   const li = channelList.querySelector(`[data-channel="${CSS.escape(channel)}"]`);
   if (li) renderChannelBadge(li, channel);
@@ -434,8 +755,7 @@ function ensureRoomTile(peerId, label) {
     tile.id = 'room-tile-' + peerId;
     const avatar = document.createElement('div');
     avatar.className = 'avatar room-avatar';
-    avatar.textContent = label.slice(0, 1).toUpperCase();
-    avatar.style.background = avatarColor(label);
+    applyAvatar(avatar, label);
     const labelEl = document.createElement('div');
     labelEl.className = 'video-tile-label';
     labelEl.textContent = label;
@@ -478,8 +798,7 @@ function setTileAvatarOnly(peerId, label) {
   if (!tile.querySelector('.room-avatar')) {
     const avatar = document.createElement('div');
     avatar.className = 'avatar room-avatar';
-    avatar.textContent = label.slice(0, 1).toUpperCase();
-    avatar.style.background = avatarColor(label);
+    applyAvatar(avatar, label);
     tile.insertBefore(avatar, tile.firstChild);
   }
 }

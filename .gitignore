@@ -1,4 +1,7 @@
 node_modules/
 history.json
+users.json
+servers.json
+dms.json
 public/talkapp.apk
 public/uploads/

@@ -13,7 +13,11 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 const PORT = process.env.PORT || 3000;
-const HISTORY_FILE = path.join(__dirname, 'history.json');
+const DATA_DIR = __dirname;
+const HISTORY_FILE = path.join(DATA_DIR, 'history.json');
+const USERS_FILE = path.join(DATA_DIR, 'users.json');
+const SERVERS_FILE = path.join(DATA_DIR, 'servers.json');
+const DMS_FILE = path.join(DATA_DIR, 'dms.json');
 const UPLOAD_DIR = path.join(__dirname, 'public', 'uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
@@ -34,64 +38,125 @@ const upload = multer({
   fileFilter: (req, file, cb) => cb(null, ALLOWED_MIME.has(file.mimetype)),
 });
 
-const CHANNELS = ['general', 'random'];
 const VOICE_CHANNEL = 'voice-lounge';
+const DEFAULT_SERVER_ID = 'home';
+const DEFAULT_CHANNELS = ['general', 'random'];
 
-// message history per text channel, persisted to a JSON file (no DB needed)
-let history = {};
-try {
-  history = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8'));
-} catch {
-  history = Object.fromEntries(CHANNELS.map((c) => [c, []]));
-}
-// Serialized + atomic persistence: only one write in flight at a time (concurrent
-// fs.writeFile calls to the same path can complete out of order and silently drop
-// messages), and writes land via tmp-file + rename so a crash mid-write can never
-// leave a truncated/corrupt history.json on disk.
-let historyWriteInFlight = false;
-let historyWritePending = false;
-
-function saveHistory() {
-  if (historyWriteInFlight) { historyWritePending = true; return; }
-  historyWriteInFlight = true;
-  const data = JSON.stringify(history);
-  const tmpFile = `${HISTORY_FILE}.tmp`;
-  fs.writeFile(tmpFile, data, (err) => {
-    if (err) {
-      historyWriteInFlight = false;
-      console.error('[history] write failed:', err);
-      return;
-    }
-    fs.rename(tmpFile, HISTORY_FILE, (err) => {
-      historyWriteInFlight = false;
-      if (err) console.error('[history] rename failed:', err);
-      if (historyWritePending) {
-        historyWritePending = false;
-        saveHistory();
-      }
+// --- generic serialized + atomic JSON store: one write in flight at a time
+// (concurrent writes to the same path can finish out of order and silently
+// drop data), landed via tmp-file + rename so a crash mid-write can never
+// leave a truncated file on disk. Same pattern for every persisted store. ---
+function makeStore(file, defaultValue) {
+  let data;
+  try {
+    data = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    data = defaultValue;
+  }
+  let writeInFlight = false;
+  let writePending = false;
+  function save() {
+    if (writeInFlight) { writePending = true; return; }
+    writeInFlight = true;
+    const json = JSON.stringify(data);
+    const tmp = `${file}.tmp`;
+    fs.writeFile(tmp, json, (err) => {
+      if (err) { writeInFlight = false; console.error(`[store] write failed for ${file}:`, err); return; }
+      fs.rename(tmp, file, (err) => {
+        writeInFlight = false;
+        if (err) console.error(`[store] rename failed for ${file}:`, err);
+        if (writePending) { writePending = false; save(); }
+      });
     });
-  });
+  }
+  return { get data() { return data; }, save };
 }
 
-// socket.id -> { username, channel, inVoice }
-const users = new Map();
+const historyStore = makeStore(HISTORY_FILE, { [`${DEFAULT_SERVER_ID}::general`]: [], [`${DEFAULT_SERVER_ID}::random`]: [] });
+const usersStore = makeStore(USERS_FILE, {}); // username -> { avatarUrl, friends: [], incoming: [], outgoing: [], servers: [] }
+const serversStore = makeStore(SERVERS_FILE, {
+  [DEFAULT_SERVER_ID]: { id: DEFAULT_SERVER_ID, name: 'Home', ownerUsername: null, channels: DEFAULT_CHANNELS, members: [] },
+});
+const dmsStore = makeStore(DMS_FILE, {}); // dmKey ("a::b" sorted) -> [msg]
+
+function history() { return historyStore.data; }
+function usersDb() { return usersStore.data; }
+function serversDb() { return serversStore.data; }
+function dmsDb() { return dmsStore.data; }
+
+function ensureUserProfile(username) {
+  const db = usersDb();
+  if (!db[username]) {
+    db[username] = { avatarUrl: null, friends: [], incoming: [], outgoing: [], servers: [DEFAULT_SERVER_ID] };
+    if (!serversDb()[DEFAULT_SERVER_ID].members.includes(username)) {
+      serversDb()[DEFAULT_SERVER_ID].members.push(username);
+    }
+    usersStore.save();
+    serversStore.save();
+  }
+  return db[username];
+}
+
+function publicProfile(username) {
+  const p = ensureUserProfile(username);
+  return { username, avatarUrl: p.avatarUrl };
+}
+
+function dmKey(a, b) { return [a, b].sort().join('::'); }
 
 // strip server-internal ownership tracking before a message ever reaches a client
 function publicMsg(m) {
   const { ownerId, ...rest } = m;
   return rest;
 }
-// server keeps up to 200 messages per channel for backlog, but only the most
-// recent 50 are sent on initial load — cuts join/switch-channel payload size
-// substantially, which matters most on mobile connections
+// only the most recent 50 messages are sent on initial load — cuts payload
+// size substantially (up to 200 are still kept server-side for backlog)
 const HISTORY_PAGE_SIZE = 50;
 function publicHistory(list) {
   return (list || []).slice(-HISTORY_PAGE_SIZE).map(publicMsg);
 }
 
+// socket.id -> { username, serverId, channel, inVoice }
+const users = new Map();
+// username -> Set<socket.id>, for routing DMs/friend notifications to every
+// tab/device a user currently has open
+const onlineSockets = new Map();
+
+function addOnlineSocket(username, socketId) {
+  if (!onlineSockets.has(username)) onlineSockets.set(username, new Set());
+  onlineSockets.get(username).add(socketId);
+}
+function removeOnlineSocket(username, socketId) {
+  const set = onlineSockets.get(username);
+  if (!set) return;
+  set.delete(socketId);
+  if (set.size === 0) onlineSockets.delete(username);
+}
+function emitToUser(username, event, payload) {
+  const set = onlineSockets.get(username);
+  if (!set) return;
+  set.forEach((sid) => io.to(sid).emit(event, payload));
+}
+
 function broadcastPresence() {
-  const list = [...users.values()].map((u) => ({ username: u.username, inVoice: u.inVoice }));
+  const list = [...users.values()].map((u) => ({ ...publicProfile(u.username), inVoice: u.inVoice }));
   io.emit('presence', list);
+}
+
+function publicServerList() {
+  return Object.values(serversDb()).map((s) => ({
+    id: s.id,
+    name: s.name,
+    ownerUsername: s.ownerUsername,
+    memberCount: s.members.length,
+  }));
+}
+
+function myServerList(username) {
+  const profile = ensureUserProfile(username);
+  return profile.servers.map((id) => serversDb()[id]).filter(Boolean).map((s) => ({
+    id: s.id, name: s.name, channels: s.channels,
+  }));
 }
 
 app.use(express.static(path.join(__dirname, 'public')));
@@ -117,20 +182,43 @@ io.on('connection', (socket) => {
 
   socket.on('join', (username) => {
     username = String(username || '').trim().slice(0, 24) || `guest-${socket.id.slice(0, 4)}`;
-    users.set(socket.id, { username, channel: 'general', inVoice: false });
-    // join every text channel's room so unread messages in channels the user
-    // isn't currently viewing still reach the client (for unread badges)
-    CHANNELS.forEach((c) => socket.join(c));
-    socket.emit('joined', { username, channels: CHANNELS, history: publicHistory(history['general']) });
+    const profile = ensureUserProfile(username);
+    users.set(socket.id, { username, serverId: DEFAULT_SERVER_ID, channel: 'general', inVoice: false });
+    addOnlineSocket(username, socket.id);
+
+    // join every channel room in every server this user is a member of, so
+    // messages/typing reach the client even for servers/channels not
+    // currently being viewed (needed for unread badges)
+    profile.servers.forEach((sid) => {
+      const s = serversDb()[sid];
+      if (s) s.channels.forEach((c) => socket.join(`${sid}::${c}`));
+    });
+
+    const server0 = serversDb()[DEFAULT_SERVER_ID];
+    socket.emit('joined', {
+      username,
+      profile: { avatarUrl: profile.avatarUrl },
+      servers: myServerList(username),
+      serverList: publicServerList(),
+      currentServerId: DEFAULT_SERVER_ID,
+      channels: server0.channels,
+      history: publicHistory(history()[`${DEFAULT_SERVER_ID}::general`]),
+      friends: profile.friends.map(publicProfile),
+      incomingRequests: profile.incoming.slice(),
+      outgoingRequests: profile.outgoing.slice(),
+    });
     broadcastPresence();
     console.log(`[join] ${socket.id} -> "${username}"`);
   });
 
-  socket.on('switch-channel', (channel) => {
+  socket.on('switch-channel', ({ serverId, channel }) => {
     const u = users.get(socket.id);
-    if (!u || !CHANNELS.includes(channel)) return;
-    u.channel = channel; // sockets stay joined to every channel room; this just tracks where new messages/typing go
-    socket.emit('channel-history', { channel, history: publicHistory(history[channel]) });
+    if (!u) return;
+    const s = serversDb()[serverId];
+    if (!s || !s.channels.includes(channel)) return;
+    u.serverId = serverId;
+    u.channel = channel; // sockets stay joined to every member channel room; this just tracks where new sends/typing go
+    socket.emit('channel-history', { serverId, channel, history: publicHistory(history()[`${serverId}::${channel}`]) });
   });
 
   socket.on('chat-message', (payload) => {
@@ -155,28 +243,196 @@ io.on('connection', (socket) => {
       ts: Date.now(),
       ownerId: socket.id, // stripped before broadcast; server-side ownership check for delete
     };
-    history[u.channel] = history[u.channel] || [];
-    history[u.channel].push(msg);
-    if (history[u.channel].length > 200) history[u.channel].shift();
-    saveHistory();
-    io.to(u.channel).emit('chat-message', { channel: u.channel, msg: publicMsg(msg) });
+    const key = `${u.serverId}::${u.channel}`;
+    history()[key] = history()[key] || [];
+    history()[key].push(msg);
+    if (history()[key].length > 200) history()[key].shift();
+    historyStore.save();
+    io.to(key).emit('chat-message', { serverId: u.serverId, channel: u.channel, msg: publicMsg(msg) });
   });
 
-  socket.on('delete-message', ({ channel, id }) => {
+  socket.on('delete-message', ({ serverId, channel, id }) => {
     const u = users.get(socket.id);
-    if (!u || !CHANNELS.includes(channel)) return;
-    const list = history[channel] || [];
+    if (!u) return;
+    const key = `${serverId}::${channel}`;
+    const list = history()[key] || [];
     const idx = list.findIndex((m) => m.id === id);
     if (idx === -1 || list[idx].ownerId !== socket.id) return;
     list.splice(idx, 1);
-    saveHistory();
-    io.to(channel).emit('message-deleted', { channel, id });
+    historyStore.save();
+    io.to(key).emit('message-deleted', { serverId, channel, id });
   });
 
   socket.on('typing', () => {
     const u = users.get(socket.id);
     if (!u) return;
-    socket.to(u.channel).emit('typing', { channel: u.channel, username: u.username });
+    socket.to(`${u.serverId}::${u.channel}`).emit('typing', { serverId: u.serverId, channel: u.channel, username: u.username });
+  });
+
+  // --- servers (Discord-style: create your own, browse/join others) ---
+  socket.on('create-server', (name) => {
+    const u = users.get(socket.id);
+    if (!u) return;
+    name = String(name || '').trim().slice(0, 40);
+    if (!name) return;
+    const id = crypto.randomBytes(6).toString('hex');
+    serversDb()[id] = { id, name, ownerUsername: u.username, channels: DEFAULT_CHANNELS.slice(), members: [u.username] };
+    serversStore.save();
+    const profile = ensureUserProfile(u.username);
+    profile.servers.push(id);
+    usersStore.save();
+    DEFAULT_CHANNELS.forEach((c) => {
+      const key = `${id}::${c}`;
+      history()[key] = history()[key] || [];
+    });
+    historyStore.save();
+    socket.join(`${id}::general`);
+    socket.join(`${id}::random`);
+    socket.emit('server-created', { id, name, channels: DEFAULT_CHANNELS });
+    io.emit('server-list', publicServerList());
+    console.log(`[create-server] "${u.username}" created "${name}" (${id})`);
+  });
+
+  socket.on('list-servers', () => {
+    socket.emit('server-list', publicServerList());
+  });
+
+  socket.on('join-server', (serverId) => {
+    const u = users.get(socket.id);
+    if (!u) return;
+    const s = serversDb()[serverId];
+    if (!s) return;
+    const profile = ensureUserProfile(u.username);
+    if (!profile.servers.includes(serverId)) {
+      profile.servers.push(serverId);
+      usersStore.save();
+    }
+    if (!s.members.includes(u.username)) {
+      s.members.push(u.username);
+      serversStore.save();
+    }
+    s.channels.forEach((c) => socket.join(`${serverId}::${c}`));
+    socket.emit('server-joined', { id: s.id, name: s.name, channels: s.channels });
+    io.emit('server-list', publicServerList());
+  });
+
+  // --- friends ---
+  socket.on('friend-request', (toUsername) => {
+    const u = users.get(socket.id);
+    if (!u) return;
+    toUsername = String(toUsername || '').trim().slice(0, 24);
+    if (!toUsername || toUsername === u.username) return;
+    const target = usersDb()[toUsername];
+    if (!target) return; // only known (previously-joined) usernames can be friended
+    const me = ensureUserProfile(u.username);
+    if (me.friends.includes(toUsername) || me.outgoing.includes(toUsername)) return;
+    me.outgoing.push(toUsername);
+    if (!target.incoming.includes(u.username)) target.incoming.push(u.username);
+    usersStore.save();
+    socket.emit('friend-outgoing-added', toUsername);
+    emitToUser(toUsername, 'friend-request-received', publicProfile(u.username));
+  });
+
+  socket.on('friend-accept', (fromUsername) => {
+    const u = users.get(socket.id);
+    if (!u) return;
+    const me = ensureUserProfile(u.username);
+    const other = usersDb()[fromUsername];
+    if (!other || !me.incoming.includes(fromUsername)) return;
+    me.incoming = me.incoming.filter((n) => n !== fromUsername);
+    other.outgoing = other.outgoing.filter((n) => n !== u.username);
+    if (!me.friends.includes(fromUsername)) me.friends.push(fromUsername);
+    if (!other.friends.includes(u.username)) other.friends.push(u.username);
+    usersStore.save();
+    socket.emit('friend-added', publicProfile(fromUsername));
+    emitToUser(fromUsername, 'friend-added', publicProfile(u.username));
+  });
+
+  socket.on('friend-decline', (fromUsername) => {
+    const u = users.get(socket.id);
+    if (!u) return;
+    const me = ensureUserProfile(u.username);
+    const other = usersDb()[fromUsername];
+    me.incoming = me.incoming.filter((n) => n !== fromUsername);
+    if (other) other.outgoing = other.outgoing.filter((n) => n !== u.username);
+    usersStore.save();
+    socket.emit('friend-incoming-removed', fromUsername);
+  });
+
+  socket.on('friend-remove', (otherUsername) => {
+    const u = users.get(socket.id);
+    if (!u) return;
+    const me = ensureUserProfile(u.username);
+    const other = usersDb()[otherUsername];
+    me.friends = me.friends.filter((n) => n !== otherUsername);
+    if (other) other.friends = other.friends.filter((n) => n !== u.username);
+    usersStore.save();
+    socket.emit('friend-removed', otherUsername);
+    emitToUser(otherUsername, 'friend-removed', u.username);
+  });
+
+  // --- direct messages ---
+  socket.on('dm-history', (withUser) => {
+    const u = users.get(socket.id);
+    if (!u) return;
+    const key = dmKey(u.username, withUser);
+    socket.emit('dm-history', { withUser, history: (dmsDb()[key] || []).slice(-HISTORY_PAGE_SIZE) });
+  });
+
+  socket.on('dm-message', ({ to, text }) => {
+    const u = users.get(socket.id);
+    if (!u || !to || !text) return;
+    const key = dmKey(u.username, to);
+    const msg = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, from: u.username, text: String(text).slice(0, 2000), ts: Date.now() };
+    dmsDb()[key] = dmsDb()[key] || [];
+    dmsDb()[key].push(msg);
+    if (dmsDb()[key].length > 200) dmsDb()[key].shift();
+    dmsStore.save();
+    socket.emit('dm-message', { withUser: to, msg });
+    emitToUser(to, 'dm-message', { withUser: u.username, msg });
+  });
+
+  // --- profile: avatar + rename ---
+  socket.on('set-avatar', (url) => {
+    const u = users.get(socket.id);
+    if (!u || typeof url !== 'string' || !url.startsWith('/uploads/')) return;
+    const profile = ensureUserProfile(u.username);
+    profile.avatarUrl = url;
+    usersStore.save();
+    io.emit('profile-updated', publicProfile(u.username));
+  });
+
+  socket.on('rename', (newUsername) => {
+    const u = users.get(socket.id);
+    if (!u) return;
+    newUsername = String(newUsername || '').trim().slice(0, 24);
+    if (!newUsername || newUsername === u.username) return;
+    const db = usersDb();
+    if (db[newUsername]) { socket.emit('rename-failed', 'That name is taken.'); return; }
+    const oldUsername = u.username;
+    const profile = db[oldUsername];
+    delete db[oldUsername];
+    db[newUsername] = profile;
+    // fix up references in every other profile's friends/incoming/outgoing lists
+    Object.values(db).forEach((p) => {
+      ['friends', 'incoming', 'outgoing'].forEach((k) => {
+        const i = p[k].indexOf(oldUsername);
+        if (i !== -1) p[k][i] = newUsername;
+      });
+    });
+    Object.values(serversDb()).forEach((s) => {
+      const i = s.members.indexOf(oldUsername);
+      if (i !== -1) s.members[i] = newUsername;
+      if (s.ownerUsername === oldUsername) s.ownerUsername = newUsername;
+    });
+    usersStore.save();
+    serversStore.save();
+    u.username = newUsername;
+    removeOnlineSocket(oldUsername, socket.id);
+    addOnlineSocket(newUsername, socket.id);
+    socket.emit('renamed', newUsername);
+    broadcastPresence();
+    console.log(`[rename] "${oldUsername}" -> "${newUsername}"`);
   });
 
   // --- WebRTC signaling relay for peer-to-peer voice (mesh) ---
@@ -212,7 +468,10 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     const u = users.get(socket.id);
     users.delete(socket.id);
-    if (u && u.inVoice) socket.to(VOICE_CHANNEL).emit('voice-peer-left', { id: socket.id });
+    if (u) {
+      removeOnlineSocket(u.username, socket.id);
+      if (u.inVoice) socket.to(VOICE_CHANNEL).emit('voice-peer-left', { id: socket.id });
+    }
     broadcastPresence();
     console.log(`[disconnect] ${socket.id}${u ? ` ("${u.username}")` : ''}`);
   });
