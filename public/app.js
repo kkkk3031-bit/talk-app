@@ -428,7 +428,7 @@ function renderChannelList(channels) {
   channelList.innerHTML = '';
   channels.forEach((c) => {
     const li = document.createElement('li');
-    li.textContent = `# ${c}`;
+    li.innerHTML = `<span class="channel-hash">#</span><span class="channel-name">${escapeHtml(c)}</span>`;
     li.dataset.channel = c;
     li.addEventListener('click', () => {
       currentChannel = c;
@@ -461,7 +461,7 @@ function setMainView(view) {
   voiceRoomNavEl.classList.toggle('active', isVoice);
   friendsNavEl.classList.toggle('active', isFriends);
   [...channelList.children].forEach((el) => el.classList.toggle('active', isText && el.dataset.channel === currentChannel));
-  if (isText) mainHeaderTextEl.textContent = `# ${currentChannel}`;
+  if (isText) mainHeaderTextEl.innerHTML = `<span class="channel-hash">#</span>${escapeHtml(currentChannel)}`;
   else if (isVoice) mainHeaderTextEl.textContent = '🔊 Voice Room';
   else if (isFriends) mainHeaderTextEl.textContent = '👥 Friends';
   else if (isDm) mainHeaderTextEl.textContent = `@${currentDmUser}`;
@@ -769,9 +769,21 @@ function openDm(username) {
   dmTypingIndicatorEl.textContent = '';
 }
 
+function renderDmWelcome(container, username) {
+  const div = document.createElement('div');
+  div.className = 'chat-welcome';
+  div.innerHTML = `
+    <div class="chat-welcome-icon avatar">${escapeHtml(username.slice(0, 1).toUpperCase())}</div>
+    <h2>${escapeHtml(username)}</h2>
+    <p>This is the start of your conversation with ${escapeHtml(username)}.</p>
+  `;
+  container.appendChild(div);
+}
+
 socket.on('dm-history', ({ withUser, history }) => {
   if (withUser !== currentDmUser) return;
   dmMessageList.clear();
+  renderDmWelcome(dmMessagesEl, withUser);
   history.forEach((m) => renderDmMessage(m));
 });
 
@@ -888,9 +900,21 @@ socket.on('joined', (data) => {
   }
 });
 
+function renderChannelWelcome(container, channel) {
+  const div = document.createElement('div');
+  div.className = 'chat-welcome';
+  div.innerHTML = `
+    <div class="chat-welcome-icon">#</div>
+    <h2>Welcome to #${escapeHtml(channel)}</h2>
+    <p>This is the start of the #${escapeHtml(channel)} channel.</p>
+  `;
+  container.appendChild(div);
+}
+
 socket.on('channel-history', ({ serverId, channel, history }) => {
   if (serverId !== currentServerId || channel !== currentChannel) return;
   clearMessages();
+  renderChannelWelcome(messagesEl, channel);
   history.forEach((m) => renderMessage(m));
 });
 
