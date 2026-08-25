@@ -173,7 +173,28 @@ function myServerList(username) {
   }));
 }
 
-app.use(express.static(path.join(__dirname, 'public')));
+const PUBLIC_DIR = path.join(__dirname, 'public');
+
+// Serves index.html with app.js/style.css URLs cache-busted by each file's
+// actual mtime. The Android app's WebView has a track record of
+// over-aggressively caching JS/CSS across app restarts — a Cache-Control
+// header only asks nicely; a URL that's byte-different whenever the file
+// actually changes is the one thing no caching bug can misinterpret.
+function serveIndex(req, res) {
+  let html = fs.readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8');
+  const v = (file) => { try { return fs.statSync(path.join(PUBLIC_DIR, file)).mtimeMs; } catch { return Date.now(); } };
+  html = html
+    .replace('/style.css"', `/style.css?v=${v('style.css')}"`)
+    .replace('/app.js"', `/app.js?v=${v('app.js')}"`);
+  res.setHeader('Cache-Control', 'no-cache');
+  res.type('html').send(html);
+}
+app.get('/', serveIndex);
+app.get('/index.html', serveIndex);
+
+app.use(express.static(PUBLIC_DIR, {
+  setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
+}));
 
 app.post('/api/upload', (req, res) => {
   upload.single('file')(req, res, (err) => {
