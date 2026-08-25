@@ -246,7 +246,7 @@ function renderAttachment(att) {
 // list and the DM message list, each with its own independent grouping state.
 const GROUP_WINDOW_MS = 7 * 60 * 1000;
 
-function createMessageList(container, { onDelete } = {}) {
+function createMessageList(container, { onDelete, onEdit } = {}) {
   let lastGroupAuthor = null;
   let lastGroupTs = 0;
 
@@ -256,12 +256,21 @@ function createMessageList(container, { onDelete } = {}) {
     lastGroupTs = 0;
   }
 
-  function render({ id, username, text, attachment, ts }, system = false) {
+  function textSpanHtml(text, edited) {
+    if (!text) return '';
+    // the (edited) tag lives INSIDE .text (not as a sibling) so it flows
+    // right after the last word on the wrapped line, matching Discord —
+    // .text is display:block, so a sibling span would start on its own line
+    return `<span class="text">${escapeHtml(text)}${edited ? ' <span class="edited-tag">(edited)</span>' : ''}</span>`;
+  }
+
+  function render({ id, username, text, attachment, ts, edited }, system = false) {
     const div = document.createElement('div');
     const time = new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const mine = !system && !!onDelete && username === myUsername;
-    const textHtml = text ? `<span class="text">${escapeHtml(text)}</span>` : '';
+    const textHtml = textSpanHtml(text, edited);
     const attHtml = attachment ? renderAttachment(attachment) : '';
+    const editBtnHtml = mine && text && onEdit ? '<button class="edit-btn" title="Edit">✏️</button>' : '';
     const deleteBtnHtml = mine ? '<button class="delete-btn" title="Delete">🗑</button>' : '';
 
     if (system) {
@@ -283,10 +292,12 @@ function createMessageList(container, { onDelete } = {}) {
     const headerHtml = grouped
       ? ''
       : `<div class="message-header"><span class="author">${escapeHtml(username)}</span><span class="time">${time}</span></div>`;
-    div.innerHTML = `<div class="message-gutter">${gutterHtml}</div><div class="message-body">${headerHtml}${textHtml}${attHtml}</div>${deleteBtnHtml}`;
+    div.innerHTML = `<div class="message-gutter">${gutterHtml}</div><div class="message-body">${headerHtml}${textHtml}${attHtml}</div><div class="message-actions">${editBtnHtml}${deleteBtnHtml}</div>`;
     if (!grouped) applyAvatar(div.querySelector('.message-avatar'), username);
     if (mine) {
       div.querySelector('.delete-btn').addEventListener('click', () => onDelete(id));
+      const editBtn = div.querySelector('.edit-btn');
+      if (editBtn) editBtn.addEventListener('click', () => beginEdit(div, id));
     }
     lastGroupAuthor = username;
     lastGroupTs = ts;
@@ -294,11 +305,55 @@ function createMessageList(container, { onDelete } = {}) {
     container.scrollTop = container.scrollHeight;
   }
 
-  return { clear, render };
+  function beginEdit(div, id) {
+    const textEl = div.querySelector('.text');
+    if (!textEl || div.querySelector('.edit-input')) return; // no text to edit, or already editing
+    const original = textEl.textContent;
+    const input = document.createElement('input');
+    input.className = 'edit-input';
+    input.value = original;
+    textEl.replaceWith(input);
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+
+    // finish() removes `input` from the DOM, which itself fires a blur event —
+    // without this guard, an Enter/Escape keypress and the blur it triggers
+    // would both call finish() and the second call's replaceWith() would
+    // throw (input is no longer a child of anything by then)
+    let finished = false;
+    const finish = (commit) => {
+      if (finished) return;
+      finished = true;
+      const newVal = input.value.trim();
+      if (commit && newVal && newVal !== original) onEdit(id, newVal);
+      const restored = document.createElement('span');
+      restored.className = 'text';
+      restored.textContent = commit && newVal ? newVal : original;
+      input.replaceWith(restored);
+    };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') finish(true);
+      else if (e.key === 'Escape') finish(false);
+    });
+    input.addEventListener('blur', () => finish(true));
+  }
+
+  // applies a server-confirmed edit to an already-rendered message (own or
+  // someone else's — every tab of the editor gets this same echo too)
+  function applyEdit(id, text) {
+    const div = container.querySelector(`[data-id="${CSS.escape(id)}"]`);
+    if (!div) return;
+    const textEl = div.querySelector('.text');
+    if (!textEl) return;
+    textEl.innerHTML = `${escapeHtml(text)} <span class="edited-tag">(edited)</span>`;
+  }
+
+  return { clear, render, applyEdit };
 }
 
 const channelMessageList = createMessageList(messagesEl, {
   onDelete: (id) => socket.emit('delete-message', { serverId: currentServerId, channel: currentChannel, id }),
+  onEdit: (id, text) => socket.emit('edit-message', { serverId: currentServerId, channel: currentChannel, id, text }),
 });
 function clearMessages() { channelMessageList.clear(); }
 function renderMessage(msg, system = false) { channelMessageList.render(msg, system); }
@@ -727,6 +782,11 @@ socket.on('message-deleted', ({ serverId, channel, id }) => {
   if (serverId !== currentServerId || channel !== currentChannel) return;
   const el = messagesEl.querySelector(`[data-id="${CSS.escape(id)}"]`);
   if (el) el.remove();
+});
+
+socket.on('message-edited', ({ serverId, channel, id, text }) => {
+  if (serverId !== currentServerId || channel !== currentChannel) return;
+  channelMessageList.applyEdit(id, text);
 });
 
 socket.on('presence', renderPresence);

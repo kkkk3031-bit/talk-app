@@ -324,6 +324,22 @@ io.on('connection', (socket) => {
     io.to(key).emit('message-deleted', { serverId, channel, id });
   });
 
+  socket.on('edit-message', ({ serverId, channel, id, text }) => {
+    const u = users.get(socket.id);
+    if (!u) return;
+    if (rateLimited(socket, 'chat-message', 10, 5000)) return;
+    const key = `${serverId}::${channel}`;
+    const list = history()[key] || [];
+    const msg = list.find((m) => m.id === id);
+    if (!msg || msg.ownerId !== socket.id) return;
+    const newText = String(text || '').slice(0, 2000).trim();
+    if (!newText) return; // editing to empty isn't supported — that's what delete is for
+    msg.text = newText;
+    msg.edited = true;
+    historyStore.save();
+    io.to(key).emit('message-edited', { serverId, channel, id, text: newText });
+  });
+
   socket.on('typing', () => {
     const u = users.get(socket.id);
     if (!u) return;

@@ -316,7 +316,20 @@ body {
   unicode-bidi: plaintext; /* each message renders RTL/LTR based on its own content (mixed Arabic/English chat) */
 }
 .message.system .text { color: #949ba4; font-style: italic; font-size: 14px; }
-.message .delete-btn {
+.edited-tag { color: #6a6e76; font-size: 11px; }
+.edit-input {
+  display: block;
+  width: 100%;
+  font: inherit;
+  font-size: 16px;
+  color: #dbdee1;
+  background: #383a40;
+  border: 1px solid #5865f2;
+  border-radius: 4px;
+  padding: 4px 6px;
+  margin: 2px 0;
+}
+.message-actions {
   display: none;
   position: absolute;
   right: 16px;
@@ -324,13 +337,20 @@ body {
   background: #313338;
   border: 1px solid #26282c;
   border-radius: 4px;
+  overflow: hidden;
+}
+.message:hover .message-actions { display: flex; }
+.message-actions .edit-btn,
+.message-actions .delete-btn {
+  background: none;
+  border: none;
   color: #949ba4;
   cursor: pointer;
   font-size: 13px;
   padding: 4px 6px;
 }
-.message:hover .delete-btn { display: inline-block; }
-.message .delete-btn:hover { color: #da373c; }
+.message-actions .delete-btn:hover { color: #da373c; }
+.message-actions .edit-btn:hover { color: #fff; background: #35373c; }
 .attachment-img {
   max-width: 320px;
   max-height: 240px;
