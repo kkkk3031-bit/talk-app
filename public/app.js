@@ -1107,7 +1107,16 @@ async function acquireMicStream() {
 
   const attempts = [
     () => navigator.mediaDevices.getUserMedia({ audio: withDevice }),
-    () => navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }),
+    // Chromium picks a VOICE_COMMUNICATION AudioSource when echoCancellation
+    // (default true, including for plain `{audio: true}`) is requested,
+    // which needs the app to have set up AudioManager communication mode.
+    // The standalone Chrome app does that internally; a bare WebView does
+    // not — confirmed on a real device (Samsung, Android 16, Chrome 152
+    // WebView) via the /api/client-log beacon: every previous fallback here
+    // still requested echo cancellation, so none of them actually exercised
+    // a different AudioSource and all failed identically. Explicitly
+    // disabling all processing forces a plain MIC source instead.
+    () => navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } }),
     () => navigator.mediaDevices.getUserMedia({ audio: true }),
   ];
 
