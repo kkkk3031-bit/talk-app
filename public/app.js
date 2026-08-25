@@ -509,16 +509,28 @@ function refreshFriendsView() {
 
 // --- DM unread badges: per-friend-row, plus a summary dot on the Friends nav item ---
 const dmUnreadCounts = {};
+// NOTE: no optional chaining (?.) or other ES2020+ syntax in this file — the
+// Android app's WebView is a very old Chromium (66, from ~2018) and a single
+// unsupported token anywhere is a hard parse-time SyntaxError that silently
+// kills the *entire* script, disabling every feature, not just the one using it.
+function findFriendRow(username) {
+  const rows = friendsListEl.querySelectorAll('.friend-row');
+  for (let i = 0; i < rows.length; i++) {
+    const label = rows[i].querySelector('.friend-name-clickable');
+    if (label && label.textContent === username) return rows[i];
+  }
+  return null;
+}
 function bumpDmUnread(fromUsername) {
   dmUnreadCounts[fromUsername] = (dmUnreadCounts[fromUsername] || 0) + 1;
-  const li = [...friendsListEl.querySelectorAll('.friend-row')].find((row) => row.querySelector('.friend-name-clickable')?.textContent === fromUsername);
+  const li = findFriendRow(fromUsername);
   if (li) renderDmUnreadBadge(li, fromUsername);
   renderFriendsNavBadge();
 }
 function clearDmUnread(username) {
   if (!dmUnreadCounts[username]) return;
   delete dmUnreadCounts[username];
-  const li = [...friendsListEl.querySelectorAll('.friend-row')].find((row) => row.querySelector('.friend-name-clickable')?.textContent === username);
+  const li = findFriendRow(username);
   if (li) renderDmUnreadBadge(li, username);
   renderFriendsNavBadge();
 }
@@ -1079,13 +1091,20 @@ voiceToggleBtn.addEventListener('click', async () => {
   }
 });
 
+// the Android app's WebView tags its user-agent so the two "how to fix this"
+// paths (browser address-bar vs. Android app Settings) can be told apart —
+// see MainActivity's settings.setUserAgentString()
+const IS_ANDROID_APP = /TalkAppAndroid/.test(navigator.userAgent);
+
 // maps getUserMedia() DOMException names to what the user should actually do,
 // instead of surfacing the raw browser error string
 function mediaErrorMessage(err, device) {
   switch (err.name) {
     case 'NotAllowedError':
     case 'PermissionDeniedError':
-      return `${device === 'camera' ? 'Camera' : 'Microphone'} access was blocked. Click the padlock/site-info icon in your address bar, allow ${device}, then reload the page.`;
+      return IS_ANDROID_APP
+        ? `${device === 'camera' ? 'Camera' : 'Microphone'} access is blocked for talk-app. Open your phone's Settings > Apps > talk-app > Permissions, and allow ${device === 'camera' ? 'Camera' : 'Microphone'}.`
+        : `${device === 'camera' ? 'Camera' : 'Microphone'} access was blocked. Click the padlock/site-info icon in your address bar, allow ${device}, then reload the page.`;
     case 'NotFoundError':
     case 'DevicesNotFoundError':
       return `No ${device} was found on this device.`;
