@@ -8,7 +8,14 @@ const compression = require('compression');
 const { Server } = require('socket.io');
 
 const app = express();
+app.disable('x-powered-by');
 app.use(compression()); // gzip text responses (JS/CSS/HTML/JSON) — big win on mobile connections
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  next();
+});
 const server = http.createServer(app);
 const io = new Server(server);
 
@@ -139,7 +146,14 @@ function emitToUser(username, event, payload) {
 }
 
 function broadcastPresence() {
-  const list = [...users.values()].map((u) => ({ ...publicProfile(u.username), inVoice: u.inVoice }));
+  // one row per account, not per socket — a user with multiple tabs/devices
+  // open would otherwise show up once per connection
+  const byUsername = new Map();
+  for (const u of users.values()) {
+    const existing = byUsername.get(u.username);
+    byUsername.set(u.username, { username: u.username, inVoice: (existing?.inVoice || false) || u.inVoice });
+  }
+  const list = [...byUsername.values()].map((u) => ({ ...publicProfile(u.username), inVoice: u.inVoice }));
   io.emit('presence', list);
 }
 
