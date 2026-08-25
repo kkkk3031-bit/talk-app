@@ -1,6 +1,6 @@
 # talk-app-android
 
-A thin Android WebView shell around [talk-app](https://github.com/khaledq84ever/talk-app) — loads the web chat/voice app full-screen and grants it microphone access for voice calls.
+A thin Android WebView shell around the [talk-app](../README.md) server/web client (one directory up) — loads the web chat/voice app full-screen and grants it microphone access for voice calls.
 
 ## How it works
 

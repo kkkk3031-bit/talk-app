@@ -27,4 +27,4 @@ Open `http://localhost:3000`. Voice requires a secure context — `localhost` an
 
 ## Android
 
-A WebView shell wrapping this app lives in a separate repo: [talk-app-android](https://github.com/khaledq84ever/talk-app-android). It points at a `SERVER_URL` that must be reachable from the device.
+A thin WebView shell wrapping this app lives in `android/`. See [android/README.md](android/README.md) for build instructions. It points at a `SERVER_URL` that must be reachable from the device.
