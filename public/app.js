@@ -512,6 +512,25 @@ socket.on('server-joined', (s) => {
   serverModal.classList.add('hidden');
 });
 
+socket.on('server-member-kicked', ({ serverId, username }) => {
+  const s = myServers.get(serverId);
+  if (s && s.members) s.members = s.members.filter((m) => m !== username);
+  if (serverId === currentServerId && !serverModal.classList.contains('hidden')) renderServerMembers();
+});
+
+socket.on('server-member-joined', ({ serverId, members }) => {
+  const s = myServers.get(serverId);
+  if (s) s.members = members;
+  if (serverId === currentServerId && !serverModal.classList.contains('hidden')) renderServerMembers();
+});
+
+socket.on('kicked-from-server', ({ serverId, name }) => {
+  myServers.delete(serverId);
+  renderServerRail();
+  alert(`You were removed from ${name}.`);
+  if (serverId === currentServerId) switchServer('home');
+});
+
 socket.on('server-list', (list) => {
   latestServerDirectory = list;
   renderBrowseServerList();
@@ -536,11 +555,40 @@ function renderBrowseServerList() {
 
 const inviteLinkInput = document.getElementById('invite-link-input');
 const copyInviteBtn = document.getElementById('copy-invite-btn');
+const serverMembersListEl = document.getElementById('server-members-list');
+
+function renderServerMembers() {
+  const s = myServers.get(currentServerId);
+  serverMembersListEl.innerHTML = '';
+  if (!s || !s.members) return;
+  const iAmOwner = s.ownerUsername === myUsername;
+  s.members.forEach((username) => {
+    const li = document.createElement('li');
+    li.className = 'friend-row';
+    const avatar = document.createElement('div');
+    avatar.className = 'avatar friend-avatar';
+    applyAvatar(avatar, username);
+    const label = document.createElement('span');
+    label.textContent = username + (username === s.ownerUsername ? ' (owner)' : '');
+    li.append(avatar, label);
+    if (iAmOwner && username !== s.ownerUsername) {
+      const kickBtn = document.createElement('button');
+      kickBtn.textContent = 'Kick';
+      kickBtn.className = 'friend-decline-btn';
+      kickBtn.addEventListener('click', () => {
+        if (confirm(`Remove ${username} from ${s.name}?`)) socket.emit('kick-member', { serverId: currentServerId, username });
+      });
+      li.appendChild(kickBtn);
+    }
+    serverMembersListEl.appendChild(li);
+  });
+}
 
 serverAddBtn.addEventListener('click', () => {
   serverModal.classList.remove('hidden');
   socket.emit('list-servers');
   inviteLinkInput.value = `${location.origin}${location.pathname}?invite=${encodeURIComponent(currentServerId)}`;
+  renderServerMembers();
 });
 copyInviteBtn.addEventListener('click', async () => {
   try {

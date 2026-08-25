@@ -546,6 +546,8 @@ body {
   padding: 24px;
   width: 360px;
   max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
 }
 .modal-box h2 { margin: 0 0 16px; color: #fff; font-size: 18px; }
 .modal-label {

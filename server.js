@@ -170,7 +170,7 @@ function publicServerList() {
 function myServerList(username) {
   const profile = ensureUserProfile(username);
   return profile.servers.map((id) => serversDb()[id]).filter(Boolean).map((s) => ({
-    id: s.id, name: s.name, channels: s.channels,
+    id: s.id, name: s.name, channels: s.channels, ownerUsername: s.ownerUsername, members: s.members,
   }));
 }
 
@@ -386,7 +386,7 @@ io.on('connection', (socket) => {
     historyStore.save();
     socket.join(`${id}::general`);
     socket.join(`${id}::random`);
-    socket.emit('server-created', { id, name, channels: DEFAULT_CHANNELS });
+    socket.emit('server-created', { id, name, channels: DEFAULT_CHANNELS, ownerUsername: u.username, members: [u.username] });
     io.emit('server-list', publicServerList());
     console.log(`[create-server] "${u.username}" created "${name}" (${id})`);
   });
@@ -410,8 +410,41 @@ io.on('connection', (socket) => {
       serversStore.save();
     }
     s.channels.forEach((c) => socket.join(`${serverId}::${c}`));
-    socket.emit('server-joined', { id: s.id, name: s.name, channels: s.channels });
+    socket.emit('server-joined', { id: s.id, name: s.name, channels: s.channels, ownerUsername: s.ownerUsername, members: s.members });
+    // tell every *other* member already in this server so their local
+    // member list (if they have it open) doesn't go stale
+    socket.to(`${serverId}::${s.channels[0]}`).emit('server-member-joined', { serverId, username: u.username, members: s.members });
     io.emit('server-list', publicServerList());
+  });
+
+  socket.on('kick-member', ({ serverId, username }) => {
+    const u = users.get(socket.id);
+    if (!u) return;
+    const s = serversDb()[serverId];
+    if (!s || s.ownerUsername !== u.username) return; // owner-only
+    if (username === s.ownerUsername || !s.members.includes(username)) return;
+
+    s.members = s.members.filter((m) => m !== username);
+    serversStore.save();
+    const profile = usersDb()[username];
+    if (profile) {
+      profile.servers = profile.servers.filter((id) => id !== serverId);
+      usersStore.save();
+    }
+
+    // pull every socket the kicked user currently has open out of this
+    // server's rooms so they stop receiving its messages immediately
+    for (const [sid, other] of users.entries()) {
+      if (other.username !== username) continue;
+      const kickedSocket = io.sockets.sockets.get(sid);
+      if (!kickedSocket) continue;
+      s.channels.forEach((c) => kickedSocket.leave(`${serverId}::${c}`));
+    }
+
+    emitToUser(username, 'kicked-from-server', { serverId, name: s.name });
+    s.channels.forEach((c) => io.to(`${serverId}::${c}`).emit('server-member-kicked', { serverId, username }));
+    io.emit('server-list', publicServerList());
+    console.log(`[kick] "${u.username}" kicked "${username}" from "${s.name}" (${serverId})`);
   });
 
   // --- friends ---
