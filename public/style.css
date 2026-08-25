@@ -350,7 +350,51 @@ body {
   padding: 4px 6px;
 }
 .message-actions .delete-btn:hover { color: #da373c; }
-.message-actions .edit-btn:hover { color: #fff; background: #35373c; }
+.message-actions .edit-btn:hover,
+.message-actions .react-btn:hover { color: #fff; background: #35373c; }
+
+.reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.reactions:empty { display: none; margin-top: 0; }
+.reaction-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #2b2d31;
+  border: 1px solid #3a3c42;
+  border-radius: 10px;
+  color: #dbdee1;
+  font-size: 13px;
+  padding: 1px 7px;
+  cursor: pointer;
+}
+.reaction-pill:hover { border-color: #5865f2; }
+.reaction-pill.mine { background: rgba(88, 101, 242, 0.18); border-color: #5865f2; }
+
+.reaction-picker {
+  position: fixed;
+  z-index: 150;
+  display: flex;
+  gap: 4px;
+  background: #313338;
+  border: 1px solid #26282c;
+  border-radius: 8px;
+  padding: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+.reaction-picker button {
+  background: none;
+  border: none;
+  font-size: 20px;
+  padding: 4px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.reaction-picker button:hover { background: #3a3c42; }
 .attachment-img {
   max-width: 320px;
   max-height: 240px;

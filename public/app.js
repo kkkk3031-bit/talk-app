@@ -246,7 +246,7 @@ function renderAttachment(att) {
 // list and the DM message list, each with its own independent grouping state.
 const GROUP_WINDOW_MS = 7 * 60 * 1000;
 
-function createMessageList(container, { onDelete, onEdit } = {}) {
+function createMessageList(container, { onDelete, onEdit, onReact } = {}) {
   let lastGroupAuthor = null;
   let lastGroupTs = 0;
 
@@ -264,12 +264,25 @@ function createMessageList(container, { onDelete, onEdit } = {}) {
     return `<span class="text">${escapeHtml(text)}${edited ? ' <span class="edited-tag">(edited)</span>' : ''}</span>`;
   }
 
-  function render({ id, username, text, attachment, ts, edited }, system = false) {
+  function reactionsHtml(reactions) {
+    if (!reactions) return '<div class="reactions"></div>';
+    const pills = Object.keys(reactions).map((emoji) => {
+      const users = reactions[emoji];
+      if (!users || !users.length) return '';
+      const mine = users.indexOf(myUsername) !== -1;
+      return `<button class="reaction-pill${mine ? ' mine' : ''}" data-emoji="${escapeHtml(emoji)}">${emoji} ${users.length}</button>`;
+    }).join('');
+    return `<div class="reactions">${pills}</div>`;
+  }
+
+  function render({ id, username, text, attachment, ts, edited, reactions }, system = false) {
     const div = document.createElement('div');
     const time = new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const mine = !system && !!onDelete && username === myUsername;
     const textHtml = textSpanHtml(text, edited);
     const attHtml = attachment ? renderAttachment(attachment) : '';
+    const reactHtml = reactionsHtml(reactions);
+    const reactBtnHtml = onReact ? '<button class="react-btn" title="Add reaction">😀</button>' : '';
     const editBtnHtml = mine && text && onEdit ? '<button class="edit-btn" title="Edit">✏️</button>' : '';
     const deleteBtnHtml = mine ? '<button class="delete-btn" title="Delete">🗑</button>' : '';
 
@@ -292,13 +305,15 @@ function createMessageList(container, { onDelete, onEdit } = {}) {
     const headerHtml = grouped
       ? ''
       : `<div class="message-header"><span class="author">${escapeHtml(username)}</span><span class="time">${time}</span></div>`;
-    div.innerHTML = `<div class="message-gutter">${gutterHtml}</div><div class="message-body">${headerHtml}${textHtml}${attHtml}</div><div class="message-actions">${editBtnHtml}${deleteBtnHtml}</div>`;
+    div.innerHTML = `<div class="message-gutter">${gutterHtml}</div><div class="message-body">${headerHtml}${textHtml}${attHtml}${reactHtml}</div><div class="message-actions">${reactBtnHtml}${editBtnHtml}${deleteBtnHtml}</div>`;
     if (!grouped) applyAvatar(div.querySelector('.message-avatar'), username);
     if (mine) {
       div.querySelector('.delete-btn').addEventListener('click', () => onDelete(id));
       const editBtn = div.querySelector('.edit-btn');
       if (editBtn) editBtn.addEventListener('click', () => beginEdit(div, id));
     }
+    const reactBtn = div.querySelector('.react-btn');
+    if (reactBtn) reactBtn.addEventListener('click', (e) => openReactionPicker(e.currentTarget, id, onReact));
     lastGroupAuthor = username;
     lastGroupTs = ts;
     container.appendChild(div);
@@ -348,12 +363,32 @@ function createMessageList(container, { onDelete, onEdit } = {}) {
     textEl.innerHTML = `${escapeHtml(text)} <span class="edited-tag">(edited)</span>`;
   }
 
-  return { clear, render, applyEdit };
+  // applies a server-confirmed reaction change (add/remove, by anyone) to an
+  // already-rendered message
+  function applyReactions(id, reactions) {
+    const div = container.querySelector(`[data-id="${CSS.escape(id)}"]`);
+    if (!div) return;
+    const el = div.querySelector('.reactions');
+    if (el) el.outerHTML = reactionsHtml(reactions);
+  }
+
+  if (onReact) {
+    container.addEventListener('click', (e) => {
+      const pill = e.target.closest('.reaction-pill');
+      if (!pill) return;
+      const messageEl = pill.closest('.message');
+      if (!messageEl || !messageEl.dataset.id) return;
+      onReact(messageEl.dataset.id, pill.dataset.emoji);
+    });
+  }
+
+  return { clear, render, applyEdit, applyReactions };
 }
 
 const channelMessageList = createMessageList(messagesEl, {
   onDelete: (id) => socket.emit('delete-message', { serverId: currentServerId, channel: currentChannel, id }),
   onEdit: (id, text) => socket.emit('edit-message', { serverId: currentServerId, channel: currentChannel, id, text }),
+  onReact: (id, emoji) => socket.emit('toggle-reaction', { serverId: currentServerId, channel: currentChannel, id, emoji }),
 });
 function clearMessages() { channelMessageList.clear(); }
 function renderMessage(msg, system = false) { channelMessageList.render(msg, system); }
@@ -787,6 +822,11 @@ socket.on('message-deleted', ({ serverId, channel, id }) => {
 socket.on('message-edited', ({ serverId, channel, id, text }) => {
   if (serverId !== currentServerId || channel !== currentChannel) return;
   channelMessageList.applyEdit(id, text);
+});
+
+socket.on('message-reaction', ({ serverId, channel, id, reactions }) => {
+  if (serverId !== currentServerId || channel !== currentChannel) return;
+  channelMessageList.applyReactions(id, reactions);
 });
 
 socket.on('presence', renderPresence);
@@ -1325,4 +1365,35 @@ document.addEventListener('click', (e) => {
 imageLightbox.addEventListener('click', () => imageLightbox.classList.add('hidden'));
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !imageLightbox.classList.contains('hidden')) imageLightbox.classList.add('hidden');
+});
+
+// --- reactions: a small fixed emoji set, click the react button to pick one,
+// click an existing pill to toggle your own reaction on/off ---
+const REACTION_EMOJI = ['👍', '❤️', '😂', '😮', '😢', '🔥'];
+const reactionPicker = document.createElement('div');
+reactionPicker.className = 'reaction-picker hidden';
+reactionPicker.innerHTML = REACTION_EMOJI.map((e) => `<button data-emoji="${e}">${e}</button>`).join('');
+document.body.appendChild(reactionPicker);
+
+let reactionPickerTarget = null; // { messageId, onReact }
+function openReactionPicker(btn, messageId, onReact) {
+  reactionPickerTarget = { messageId, onReact };
+  const rect = btn.getBoundingClientRect();
+  reactionPicker.style.top = `${rect.bottom + 4}px`;
+  reactionPicker.style.left = `${Math.max(4, rect.right - 200)}px`;
+  reactionPicker.classList.remove('hidden');
+}
+function closeReactionPicker() {
+  reactionPicker.classList.add('hidden');
+  reactionPickerTarget = null;
+}
+reactionPicker.addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-emoji]');
+  if (!btn || !reactionPickerTarget) return;
+  reactionPickerTarget.onReact(reactionPickerTarget.messageId, btn.dataset.emoji);
+  closeReactionPicker();
+});
+document.addEventListener('click', (e) => {
+  if (!reactionPickerTarget) return;
+  if (!reactionPicker.contains(e.target) && !e.target.closest('.react-btn')) closeReactionPicker();
 });

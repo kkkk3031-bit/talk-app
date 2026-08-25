@@ -48,6 +48,7 @@ const upload = multer({
 const VOICE_CHANNEL = 'voice-lounge';
 const DEFAULT_SERVER_ID = 'home';
 const DEFAULT_CHANNELS = ['general', 'random'];
+const REACTION_EMOJI = new Set(['👍', '❤️', '😂', '😮', '😢', '🔥']);
 
 // --- generic serialized + atomic JSON store: one write in flight at a time
 // (concurrent writes to the same path can finish out of order and silently
@@ -338,6 +339,25 @@ io.on('connection', (socket) => {
     msg.edited = true;
     historyStore.save();
     io.to(key).emit('message-edited', { serverId, channel, id, text: newText });
+  });
+
+  socket.on('toggle-reaction', ({ serverId, channel, id, emoji }) => {
+    const u = users.get(socket.id);
+    if (!u) return;
+    if (!REACTION_EMOJI.has(emoji)) return;
+    const key = `${serverId}::${channel}`;
+    const list = history()[key] || [];
+    const msg = list.find((m) => m.id === id);
+    if (!msg) return;
+    if (!msg.reactions) msg.reactions = {};
+    const reactors = msg.reactions[emoji] || [];
+    const idx = reactors.indexOf(u.username);
+    if (idx === -1) reactors.push(u.username);
+    else reactors.splice(idx, 1);
+    if (reactors.length === 0) delete msg.reactions[emoji];
+    else msg.reactions[emoji] = reactors;
+    historyStore.save();
+    io.to(key).emit('message-reaction', { serverId, channel, id, reactions: msg.reactions });
   });
 
   socket.on('typing', () => {
