@@ -232,22 +232,54 @@ function renderAttachment(att) {
   return `<a class="attachment-file" href="${att.url}" target="_blank" rel="noopener" download="${escapeHtml(att.name)}">📄 ${escapeHtml(att.name)} <span class="attachment-size">(${formatSize(att.size)})</span></a>`;
 }
 
+// consecutive messages from the same author within this window are grouped
+// under one avatar/header, like real Discord — reset via clearMessages()
+const GROUP_WINDOW_MS = 7 * 60 * 1000;
+let lastGroupAuthor = null;
+let lastGroupTs = 0;
+
+function clearMessages() {
+  messagesEl.innerHTML = '';
+  lastGroupAuthor = null;
+  lastGroupTs = 0;
+}
+
 function renderMessage({ id, username, text, attachment, ts }, system = false) {
   const div = document.createElement('div');
-  div.className = 'message' + (system ? ' system' : '');
-  if (id) div.dataset.id = id;
   const time = new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const mine = !system && username === myUsername;
-  const textHtml = text ? `<br/><span class="text">${escapeHtml(text)}</span>` : '';
-  const attHtml = attachment ? `<br/>${renderAttachment(attachment)}` : '';
-  div.innerHTML = system
-    ? `<span class="text">${escapeHtml(text)}</span>`
-    : `<span class="author">${escapeHtml(username)}</span><span class="time">${time}</span>${mine ? '<button class="delete-btn" title="Delete">🗑</button>' : ''}${textHtml}${attHtml}`;
+  const textHtml = text ? `<span class="text">${escapeHtml(text)}</span>` : '';
+  const attHtml = attachment ? renderAttachment(attachment) : '';
+  const deleteBtnHtml = mine ? '<button class="delete-btn" title="Delete">🗑</button>' : '';
+
+  if (system) {
+    div.className = 'message system';
+    if (id) div.dataset.id = id;
+    div.innerHTML = `<span class="text">${escapeHtml(text)}</span>`;
+    lastGroupAuthor = null;
+    messagesEl.appendChild(div);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    return;
+  }
+
+  const grouped = username === lastGroupAuthor && (ts - lastGroupTs) < GROUP_WINDOW_MS;
+  div.className = 'message' + (grouped ? ' grouped' : '');
+  if (id) div.dataset.id = id;
+  const gutterHtml = grouped
+    ? `<span class="hover-time">${time}</span>`
+    : `<div class="avatar message-avatar"></div>`;
+  const headerHtml = grouped
+    ? ''
+    : `<div class="message-header"><span class="author">${escapeHtml(username)}</span><span class="time">${time}</span></div>`;
+  div.innerHTML = `<div class="message-gutter">${gutterHtml}</div><div class="message-body">${headerHtml}${textHtml}${attHtml}</div>${deleteBtnHtml}`;
+  if (!grouped) applyAvatar(div.querySelector('.message-avatar'), username);
   if (mine) {
     div.querySelector('.delete-btn').addEventListener('click', () => {
       socket.emit('delete-message', { serverId: currentServerId, channel: currentChannel, id });
     });
   }
+  lastGroupAuthor = username;
+  lastGroupTs = ts;
   messagesEl.appendChild(div);
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
@@ -582,7 +614,7 @@ socket.on('joined', (data) => {
   servers.forEach((s) => myServers.set(s.id, s));
   renderServerRail();
   renderChannelList(channels);
-  messagesEl.innerHTML = '';
+  clearMessages();
   history.forEach((m) => renderMessage(m));
   setMainView('voice');
 
@@ -597,7 +629,7 @@ socket.on('joined', (data) => {
 
 socket.on('channel-history', ({ serverId, channel, history }) => {
   if (serverId !== currentServerId || channel !== currentChannel) return;
-  messagesEl.innerHTML = '';
+  clearMessages();
   history.forEach((m) => renderMessage(m));
 });
 

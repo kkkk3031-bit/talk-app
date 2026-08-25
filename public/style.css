@@ -254,35 +254,71 @@ body {
 #voice-media-controls { display: flex; gap: 6px; margin-top: 6px; }
 #camera-toggle-btn.active { color: #23a55a; }
 .message {
-  margin-bottom: 10px;
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  padding: 2px 48px 2px 16px;
+  margin-top: 17px; /* burst spacing before a new author, like real Discord */
 }
-.message .author {
-  font-weight: 600;
-  color: #fff;
-  margin-right: 8px;
+.messages > .message:first-child { margin-top: 0; }
+.message.grouped { margin-top: 0; }
+.message:hover { background: #2e3035; }
+.message.system {
+  padding-left: 16px;
+  color: #949ba4;
+  font-style: italic;
 }
-.message .time {
+.message-gutter {
+  width: 40px;
+  flex-shrink: 0;
+  margin-right: 16px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+.message-avatar { width: 40px; height: 40px; font-size: 16px; }
+.hover-time {
+  display: none;
+  width: 100%;
+  text-align: center;
+  padding-top: 4px;
   color: #6a6e76;
   font-size: 11px;
 }
+.message.grouped:hover .hover-time { display: block; }
+.message-body { flex: 1; min-width: 0; }
+.message-header { display: flex; align-items: baseline; gap: 8px; }
+.message .author {
+  font-weight: 600;
+  color: #fff;
+  font-size: 16px;
+}
+.message .time {
+  color: #6a6e76;
+  font-size: 12px;
+}
 .message .text {
+  display: block;
   color: #dbdee1;
+  font-size: 16px;
+  line-height: 1.375rem;
   white-space: pre-wrap;
   word-break: break-word;
   unicode-bidi: plaintext; /* each message renders RTL/LTR based on its own content (mixed Arabic/English chat) */
 }
-.message.system .text { color: #949ba4; font-style: italic; }
-.message { position: relative; }
+.message.system .text { color: #949ba4; font-style: italic; font-size: 14px; }
 .message .delete-btn {
   display: none;
   position: absolute;
-  right: 0;
-  top: 0;
-  background: none;
-  border: none;
+  right: 16px;
+  top: -8px;
+  background: #313338;
+  border: 1px solid #26282c;
+  border-radius: 4px;
   color: #949ba4;
   cursor: pointer;
   font-size: 13px;
+  padding: 4px 6px;
 }
 .message:hover .delete-btn { display: inline-block; }
 .message .delete-btn:hover { color: #da373c; }
