@@ -236,7 +236,7 @@ function formatSize(bytes) {
 function renderAttachment(att) {
   if (!att) return '';
   if (isImageMime(att.mime)) {
-    return `<a href="${att.url}" target="_blank" rel="noopener"><img class="attachment-img" src="${att.url}" alt="${escapeHtml(att.name)}" /></a>`;
+    return `<img class="attachment-img" src="${att.url}" alt="${escapeHtml(att.name)}" data-lightbox="${att.url}" />`;
   }
   return `<a class="attachment-file" href="${att.url}" target="_blank" rel="noopener" download="${escapeHtml(att.name)}">📄 ${escapeHtml(att.name)} <span class="attachment-size">(${formatSize(att.size)})</span></a>`;
 }
@@ -1118,3 +1118,18 @@ function onSidebarDragStart(e) {
 }
 sidebarResizeHandle.addEventListener('mousedown', onSidebarDragStart);
 sidebarResizeHandle.addEventListener('touchstart', onSidebarDragStart, { passive: false });
+
+// --- image lightbox: click any attachment image (chat or DM) to view full-size ---
+const imageLightbox = document.getElementById('image-lightbox');
+const lightboxImg = document.getElementById('lightbox-img');
+document.addEventListener('click', (e) => {
+  const img = e.target.closest('.attachment-img');
+  if (!img) return;
+  lightboxImg.src = img.dataset.lightbox || img.src;
+  lightboxImg.alt = img.alt;
+  imageLightbox.classList.remove('hidden');
+});
+imageLightbox.addEventListener('click', () => imageLightbox.classList.add('hidden'));
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !imageLightbox.classList.contains('hidden')) imageLightbox.classList.add('hidden');
+});

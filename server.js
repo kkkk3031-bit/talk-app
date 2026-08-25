@@ -191,6 +191,22 @@ app.post('/api/upload', (req, res) => {
   });
 });
 
+// simple fixed-window per-socket rate limit — cheap flood protection for
+// events a client could otherwise fire as fast as the wire allows
+const rateLimitState = new Map(); // socket.id -> { key -> { count, windowStart } }
+function rateLimited(socket, key, max, windowMs) {
+  let state = rateLimitState.get(socket.id);
+  if (!state) { state = {}; rateLimitState.set(socket.id, state); }
+  const now = Date.now();
+  const bucket = state[key];
+  if (!bucket || now - bucket.windowStart > windowMs) {
+    state[key] = { count: 1, windowStart: now };
+    return false;
+  }
+  bucket.count += 1;
+  return bucket.count > max;
+}
+
 io.on('connection', (socket) => {
   console.log(`[connect] ${socket.id} from ${socket.handshake.headers['x-forwarded-for'] || socket.handshake.address}`);
 
@@ -238,6 +254,7 @@ io.on('connection', (socket) => {
   socket.on('chat-message', (payload) => {
     const u = users.get(socket.id);
     if (!u) return;
+    if (rateLimited(socket, 'chat-message', 10, 5000)) return; // 10 msgs / 5s
     const { text, attachment } = typeof payload === 'string' ? { text: payload } : (payload || {});
     if (!text && !attachment) return;
     let safeAttachment = null;
@@ -280,6 +297,7 @@ io.on('connection', (socket) => {
   socket.on('typing', () => {
     const u = users.get(socket.id);
     if (!u) return;
+    if (rateLimited(socket, 'typing', 20, 3000)) return;
     socket.to(`${u.serverId}::${u.channel}`).emit('typing', { serverId: u.serverId, channel: u.channel, username: u.username });
   });
 
@@ -334,6 +352,7 @@ io.on('connection', (socket) => {
   socket.on('friend-request', (toUsername) => {
     const u = users.get(socket.id);
     if (!u) return;
+    if (rateLimited(socket, 'friend-request', 10, 10000)) return;
     toUsername = String(toUsername || '').trim().slice(0, 24);
     if (!toUsername || toUsername === u.username) return;
     const target = usersDb()[toUsername];
@@ -396,6 +415,7 @@ io.on('connection', (socket) => {
   socket.on('dm-message', ({ to, text }) => {
     const u = users.get(socket.id);
     if (!u || !to || !text) return;
+    if (rateLimited(socket, 'dm-message', 10, 5000)) return;
     const key = dmKey(u.username, to);
     const msg = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, from: u.username, text: String(text).slice(0, 2000), ts: Date.now() };
     dmsDb()[key] = dmsDb()[key] || [];
@@ -482,6 +502,7 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     const u = users.get(socket.id);
     users.delete(socket.id);
+    rateLimitState.delete(socket.id);
     if (u) {
       removeOnlineSocket(u.username, socket.id);
       if (u.inVoice) socket.to(VOICE_CHANNEL).emit('voice-peer-left', { id: socket.id });
