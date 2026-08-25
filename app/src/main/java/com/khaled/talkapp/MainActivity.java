@@ -12,9 +12,9 @@ import android.webkit.WebView;
 
 public class MainActivity extends Activity {
 
-    // 10.0.2.2 is the emulator's alias for the host machine's loopback — local dev only.
-    // Swap for a real deployed URL (HTTPS required for mic access) before shipping.
-    private static final String SERVER_URL = "http://10.0.2.2:3000";
+    // Live Cloudflare quick tunnel to the sandbox's server — ephemeral, dies on
+    // sandbox/tunnel restart. Re-check the current URL before rebuilding.
+    private static final String SERVER_URL = "https://decreased-hide-soundtrack-arch.trycloudflare.com";
     private WebView webView;
 
     @SuppressLint("SetJavaScriptEnabled")
