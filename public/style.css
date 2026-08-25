@@ -190,10 +190,10 @@ body {
   position: relative;
   width: 360px;
   max-width: 100%;
+  height: 270px; /* fallback for browsers without aspect-ratio support (e.g. old Android WebView) */
   background: #000;
   border-radius: 12px;
   overflow: hidden;
-  aspect-ratio: 4 / 3;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -201,6 +201,9 @@ body {
   transition: box-shadow 0.15s ease;
 }
 .video-tile.speaking { box-shadow: 0 0 0 3px #23a55a; }
+@supports (aspect-ratio: 4 / 3) {
+  .video-tile { aspect-ratio: 4 / 3; height: auto; }
+}
 .video-tile video { width: 100%; height: 100%; object-fit: cover; }
 .video-tile video.mirrored { transform: scaleX(-1); }
 .video-tile .room-avatar {
@@ -375,7 +378,7 @@ body {
 /* --- settings modal --- */
 .modal {
   position: fixed;
-  inset: 0;
+  top: 0; right: 0; bottom: 0; left: 0;
   background: rgba(0, 0, 0, 0.6);
   display: flex;
   align-items: center;
@@ -433,19 +436,20 @@ body {
 
   .sidebar {
     position: fixed;
-    inset: 0 25% 0 0;
+    top: 0; right: 25%; bottom: 0; left: 0;
     z-index: 90;
     width: auto;
     transform: translateX(-100%);
     transition: transform 0.2s ease;
     box-shadow: 2px 0 12px rgba(0, 0, 0, 0.4);
+    pointer-events: none; /* belt-and-suspenders: translated-offscreen shouldn't intercept touches, but don't rely on that alone */
   }
-  .sidebar.open { transform: translateX(0); }
+  .sidebar.open { transform: translateX(0); pointer-events: auto; }
 
   .sidebar-overlay {
     display: block;
     position: fixed;
-    inset: 0;
+    top: 0; right: 0; bottom: 0; left: 0;
     background: rgba(0, 0, 0, 0.5);
     z-index: 80;
   }
