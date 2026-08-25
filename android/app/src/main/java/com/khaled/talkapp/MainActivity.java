@@ -3,6 +3,7 @@ package com.khaled.talkapp;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
@@ -54,6 +55,10 @@ public class MainActivity extends Activity {
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
+        // lets the page's JS tell "running inside our WebView" apart from a real mobile
+        // browser (e.g. to give Android-Settings guidance instead of browser-address-bar
+        // guidance when mic access is blocked)
+        settings.setUserAgentString(settings.getUserAgentString() + " TalkAppAndroid/1");
 
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
@@ -64,6 +69,11 @@ public class MainActivity extends Activity {
                         request.grant(request.getResources());
                     } else {
                         request.deny();
+                        // the OS permission was denied (once, or permanently via "don't ask
+                        // again") — there's otherwise no way back into the request flow, so
+                        // offer a direct path to the app's Settings page where the user can
+                        // flip the Microphone toggle themselves
+                        showMicBlockedDialog();
                     }
                 });
             }
@@ -81,6 +91,23 @@ public class MainActivity extends Activity {
             updateCheckPendingAfterSettings = false;
             checkForUpdate();
         }
+    }
+
+    private boolean micBlockedDialogShowing = false;
+    private void showMicBlockedDialog() {
+        if (micBlockedDialogShowing || isFinishing()) return;
+        micBlockedDialogShowing = true;
+        new AlertDialog.Builder(this)
+                .setTitle("Microphone blocked")
+                .setMessage("talk-app needs microphone access for voice chat, but it's currently turned off. Open Settings, tap Permissions, and allow Microphone.")
+                .setPositiveButton("Open Settings", (dialog, which) -> {
+                    Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.fromParts("package", getPackageName(), null));
+                    startActivity(intent);
+                })
+                .setNegativeButton("Cancel", null)
+                .setOnDismissListener(dialog -> micBlockedDialogShowing = false)
+                .show();
     }
 
     @SuppressWarnings("deprecation") // getPackageInfo(int).versionCode — minSdk 26 doesn't have the long-code accessor
