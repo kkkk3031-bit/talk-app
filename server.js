@@ -528,6 +528,13 @@ io.on('connection', (socket) => {
     emitToUser(to, 'dm-message', { withUser: u.username, msg });
   });
 
+  socket.on('dm-typing', (to) => {
+    const u = users.get(socket.id);
+    if (!u || !to) return;
+    if (rateLimited(socket, 'typing', 20, 3000)) return;
+    emitToUser(to, 'dm-typing', { from: u.username });
+  });
+
   // --- profile: avatar + rename ---
   socket.on('set-avatar', (url) => {
     const u = users.get(socket.id);

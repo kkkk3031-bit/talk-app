@@ -765,6 +765,8 @@ function openDm(username) {
   socket.emit('dm-history', username);
   setMainView('dm');
   clearDmUnread(username);
+  clearTimeout(dmTypingTimeout);
+  dmTypingIndicatorEl.textContent = '';
 }
 
 socket.on('dm-history', ({ withUser, history }) => {
@@ -791,6 +793,24 @@ dmForm.addEventListener('submit', (e) => {
   if (!text || !currentDmUser) return;
   socket.emit('dm-message', { to: currentDmUser, text });
   dmInput.value = '';
+});
+
+let dmTypingEmitThrottle = 0;
+dmInput.addEventListener('input', () => {
+  if (!currentDmUser) return;
+  const now = Date.now();
+  if (now - dmTypingEmitThrottle < 2000) return;
+  dmTypingEmitThrottle = now;
+  socket.emit('dm-typing', currentDmUser);
+});
+
+const dmTypingIndicatorEl = document.getElementById('dm-typing-indicator');
+let dmTypingTimeout = null;
+socket.on('dm-typing', ({ from }) => {
+  if (from !== currentDmUser) return;
+  clearTimeout(dmTypingTimeout);
+  dmTypingIndicatorEl.textContent = `${from} is typing…`;
+  dmTypingTimeout = setTimeout(() => { dmTypingIndicatorEl.textContent = ''; }, 3000);
 });
 
 function openSidebar() {
