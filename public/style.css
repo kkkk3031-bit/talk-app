@@ -108,6 +108,14 @@ body {
   display: flex;
   flex-direction: column;
 }
+.sidebar-resize-handle {
+  width: 4px;
+  flex-shrink: 0;
+  cursor: ew-resize;
+  background: transparent;
+}
+.sidebar-resize-handle:hover,
+.sidebar-resize-handle.dragging { background: #5865f2; }
 .sidebar-spacer { flex: 1; min-height: 12px; }
 .section-title {
   font-size: 11px;
@@ -586,6 +594,18 @@ body {
   #server-rail { width: 56px; position: relative; z-index: 96; } /* stay above the sidebar-open overlay (80) so it's always usable */
   #server-rail .server-icon { width: 40px; height: 40px; font-size: 15px; }
 
+  /* while the drawer is open, float the close (✕) button at its top-right
+     corner instead of leaving it in the header's normal position, which
+     sits directly on top of the drawer's own "Friends" nav item */
+  .sidebar.open ~ .main .sidebar-toggle {
+    position: fixed;
+    top: 8px;
+    right: calc(25% + 8px);
+    background: #1e1f22;
+    border-radius: 50%;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  }
+
   .sidebar {
     position: fixed;
     /* left:0 (not 56px) so translateX(-100%) — which is always relative to
@@ -619,6 +639,8 @@ body {
   .message-form input, .login-box input, #mic-select { font-size: 16px; }
 
   .icon-btn { width: 36px; height: 36px; font-size: 18px; }
+
+  .sidebar-resize-handle { display: none; }
 
   .video-grid { max-height: 50vh; padding: 12px; gap: 10px; }
   .video-tile { width: 88vw; }

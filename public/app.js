@@ -29,6 +29,7 @@ const settingsBtn = document.getElementById('settings-btn');
 const sidebarToggleBtn = document.getElementById('sidebar-toggle-btn');
 const sidebarOverlayEl = document.getElementById('sidebar-overlay');
 const sidebarEl = document.querySelector('.sidebar');
+const sidebarResizeHandle = document.getElementById('sidebar-resize-handle');
 const settingsModal = document.getElementById('settings-modal');
 const settingsCloseBtn = document.getElementById('settings-close-btn');
 const micSelect = document.getElementById('mic-select');
@@ -110,6 +111,14 @@ async function populateMicList() {
   micSelect.value = settings.micId || '';
 }
 micSelect.addEventListener('change', () => { settings.micId = micSelect.value; saveSettings(); });
+
+// re-scan input devices live (e.g. a USB/wired mic plugged into the phone
+// while Settings is open) instead of only enumerating once on modal open
+if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+  navigator.mediaDevices.addEventListener('devicechange', () => {
+    if (!settingsModal.classList.contains('hidden')) populateMicList().catch(() => {});
+  });
+}
 
 settingsBtn.addEventListener('click', async () => {
   settingsModal.classList.remove('hidden');
@@ -978,7 +987,7 @@ voiceToggleBtn.addEventListener('click', async () => {
       if (settings.micId) audioConstraint.deviceId = { exact: settings.micId };
       localStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraint });
     } catch (err) {
-      alert('Microphone access denied or unavailable: ' + err.message);
+      alert(mediaErrorMessage(err, 'microphone'));
       return;
     }
     inVoice = true;
@@ -1009,6 +1018,26 @@ voiceToggleBtn.addEventListener('click', async () => {
   }
 });
 
+// maps getUserMedia() DOMException names to what the user should actually do,
+// instead of surfacing the raw browser error string
+function mediaErrorMessage(err, device) {
+  switch (err.name) {
+    case 'NotAllowedError':
+    case 'PermissionDeniedError':
+      return `${device === 'camera' ? 'Camera' : 'Microphone'} access was blocked. Click the padlock/site-info icon in your address bar, allow ${device}, then reload the page.`;
+    case 'NotFoundError':
+    case 'DevicesNotFoundError':
+      return `No ${device} was found on this device.`;
+    case 'NotReadableError':
+    case 'TrackStartError':
+      return `Couldn't access the ${device} — it may already be in use by another app.`;
+    case 'SecurityError':
+      return `${device === 'camera' ? 'Camera' : 'Microphone'} access requires a secure (HTTPS) connection.`;
+    default:
+      return `${device === 'camera' ? 'Camera' : 'Microphone'} access failed: ${err.message}`;
+  }
+}
+
 // --- camera ---
 let cameraStream = null;
 let cameraOn = false;
@@ -1017,7 +1046,7 @@ async function startCamera() {
   try {
     cameraStream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240 } });
   } catch (err) {
-    alert('Camera access denied or unavailable: ' + err.message);
+    alert(mediaErrorMessage(err, 'camera'));
     return;
   }
   cameraOn = true;
@@ -1049,3 +1078,43 @@ cameraToggleBtn.addEventListener('click', () => {
   if (cameraOn) stopCamera();
   else startCamera();
 });
+
+// --- sidebar drag-to-resize ---
+const SIDEBAR_MIN_WIDTH = 180;
+const SIDEBAR_MAX_WIDTH = 420;
+(() => {
+  const saved = parseInt(localStorage.getItem('sidebarWidth'), 10);
+  if (saved && saved >= SIDEBAR_MIN_WIDTH && saved <= SIDEBAR_MAX_WIDTH) {
+    sidebarEl.style.width = `${saved}px`;
+  }
+})();
+
+let sidebarDragStartX = 0;
+let sidebarDragStartWidth = 0;
+
+function onSidebarDragMove(e) {
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+  const delta = clientX - sidebarDragStartX;
+  const width = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, sidebarDragStartWidth + delta));
+  sidebarEl.style.width = `${width}px`;
+}
+function onSidebarDragEnd() {
+  sidebarResizeHandle.classList.remove('dragging');
+  document.removeEventListener('mousemove', onSidebarDragMove);
+  document.removeEventListener('mouseup', onSidebarDragEnd);
+  document.removeEventListener('touchmove', onSidebarDragMove);
+  document.removeEventListener('touchend', onSidebarDragEnd);
+  localStorage.setItem('sidebarWidth', parseInt(sidebarEl.style.width, 10));
+}
+function onSidebarDragStart(e) {
+  sidebarDragStartX = e.touches ? e.touches[0].clientX : e.clientX;
+  sidebarDragStartWidth = sidebarEl.getBoundingClientRect().width;
+  sidebarResizeHandle.classList.add('dragging');
+  document.addEventListener('mousemove', onSidebarDragMove);
+  document.addEventListener('mouseup', onSidebarDragEnd);
+  document.addEventListener('touchmove', onSidebarDragMove, { passive: true });
+  document.addEventListener('touchend', onSidebarDragEnd);
+  e.preventDefault();
+}
+sidebarResizeHandle.addEventListener('mousedown', onSidebarDragStart);
+sidebarResizeHandle.addEventListener('touchstart', onSidebarDragStart, { passive: false });
