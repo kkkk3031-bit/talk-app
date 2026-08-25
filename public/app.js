@@ -1050,19 +1050,8 @@ socket.on('voice-signal', async ({ from, signal }) => {
 
 voiceToggleBtn.addEventListener('click', async () => {
   if (!inVoice) {
-    try {
-      const audioConstraint = {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-        channelCount: 1,
-      };
-      if (settings.micId) audioConstraint.deviceId = { exact: settings.micId };
-      localStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraint });
-    } catch (err) {
-      alert(mediaErrorMessage(err, 'microphone'));
-      return;
-    }
+    localStream = await acquireMicStream();
+    if (!localStream) return;
     inVoice = true;
     micMuted = false;
     voiceToggleBtn.textContent = 'Leave Voice';
@@ -1095,6 +1084,45 @@ voiceToggleBtn.addEventListener('click', async () => {
 // paths (browser address-bar vs. Android app Settings) can be told apart —
 // see MainActivity's settings.setUserAgentString()
 const IS_ANDROID_APP = /TalkAppAndroid/.test(navigator.userAgent);
+
+// Requests a mic stream with the preferred constraints, but falls back to
+// progressively simpler ones instead of failing outright. Real Android
+// WebViews (and some real devices) routinely throw NotReadableError /
+// OverconstrainedError on the first getUserMedia() call even when nothing
+// else is actually holding the mic — a stale saved deviceId that no longer
+// exists (e.g. a Bluetooth headset that's since disconnected) or a transient
+// AudioRecord-not-ready state right after the permission grant are both
+// common, and a bare retry a moment later routinely succeeds. Only surfaces
+// an error to the user after every fallback has actually failed.
+async function acquireMicStream() {
+  const withDevice = {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+    channelCount: 1,
+  };
+  // `ideal`, not `exact` — a saved device that's no longer present must not
+  // hard-fail the whole request, it should just fall back to the default
+  if (settings.micId) withDevice.deviceId = { ideal: settings.micId };
+
+  const attempts = [
+    () => navigator.mediaDevices.getUserMedia({ audio: withDevice }),
+    () => navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }),
+    () => navigator.mediaDevices.getUserMedia({ audio: true }),
+  ];
+
+  let lastErr;
+  for (let i = 0; i < attempts.length; i++) {
+    try {
+      return await attempts[i]();
+    } catch (err) {
+      lastErr = err;
+      if (i < attempts.length - 1) await new Promise((r) => setTimeout(r, 350));
+    }
+  }
+  alert(mediaErrorMessage(lastErr, 'microphone'));
+  return null;
+}
 
 // maps getUserMedia() DOMException names to what the user should actually do,
 // instead of surfacing the raw browser error string
