@@ -26,6 +26,7 @@ public class MainActivity extends Activity {
 
         webView = new WebView(this);
         setContentView(webView);
+        WebView.setWebContentsDebuggingEnabled(true); // debug build only — lets chrome://inspect attach for diagnosing WebView-only bugs
 
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
