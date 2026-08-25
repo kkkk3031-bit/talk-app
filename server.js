@@ -187,14 +187,17 @@ function serveIndex(req, res) {
   html = html
     .replace('/style.css"', `/style.css?v=${v('style.css')}"`)
     .replace('/app.js"', `/app.js?v=${v('app.js')}"`);
-  res.setHeader('Cache-Control', 'no-cache');
+  // no-store, not just no-cache — no-cache still permits a cache to reuse a
+  // stale copy if it skips/ignores revalidation (real risk on a flaky WebView
+  // cache implementation); no-store forbids caching this response at all
+  res.setHeader('Cache-Control', 'no-store');
   res.type('html').send(html);
 }
 app.get('/', serveIndex);
 app.get('/index.html', serveIndex);
 
 app.use(express.static(PUBLIC_DIR, {
-  setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
+  setHeaders: (res) => res.setHeader('Cache-Control', 'no-store'),
 }));
 
 // diagnostic beacon: the client posts here when getUserMedia() fails after
