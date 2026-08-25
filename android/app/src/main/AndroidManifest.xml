@@ -3,6 +3,11 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Chromium's internal WebRTC audio manager calls AudioManager.setMode()/
+         setSpeakerphoneOn() when opening a mic input for getUserMedia() inside
+         a WebView; without this declared, that can silently fail and surface
+         as a generic "Could not start audio source" NotReadableError in JS. -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
 

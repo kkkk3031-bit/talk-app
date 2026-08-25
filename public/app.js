@@ -1120,28 +1120,30 @@ async function acquireMicStream() {
     () => navigator.mediaDevices.getUserMedia({ audio: true }),
   ];
 
+  const attemptErrors = [];
   let lastErr;
   for (let i = 0; i < attempts.length; i++) {
     try {
       return await attempts[i]();
     } catch (err) {
       lastErr = err;
+      attemptErrors.push(i + ':' + err.name);
       if (i < attempts.length - 1) await new Promise((r) => setTimeout(r, 350));
     }
   }
-  reportMediaError('microphone', lastErr);
+  reportMediaError('microphone', lastErr, attemptErrors);
   alert(mediaErrorMessage(lastErr, 'microphone'));
   return null;
 }
 
 // fire-and-forget: lets the exact browser-reported error show up in server
 // logs instead of relying on someone accurately relaying technical text
-function reportMediaError(context, err) {
+function reportMediaError(context, err, attemptErrors) {
   try {
     fetch('/api/client-log', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ context, name: err.name, message: err.message, ua: navigator.userAgent }),
+      body: JSON.stringify({ context, name: err.name, message: err.message, attempts: attemptErrors || null, ua: navigator.userAgent }),
     }).catch(() => {});
   } catch (e) { /* ignore — this is best-effort diagnostics, never block the user-facing error */ }
 }

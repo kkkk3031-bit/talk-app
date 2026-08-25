@@ -200,8 +200,8 @@ app.use(express.static(PUBLIC_DIR, {
 // every fallback, so the exact browser-reported error is visible in server
 // logs without depending on a user accurately relaying technical text
 app.post('/api/client-log', express.json({ limit: '2kb' }), (req, res) => {
-  const { context, name, message, ua } = req.body || {};
-  console.log(`[client-error] context=${context} name=${name} message=${message} ua=${ua}`);
+  const { context, name, message, attempts, ua } = req.body || {};
+  console.log(`[client-error] context=${context} name=${name} message=${message} attempts=${JSON.stringify(attempts)} ua=${ua}`);
   res.status(204).end();
 });
 
