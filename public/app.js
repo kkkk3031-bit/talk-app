@@ -534,9 +534,23 @@ function renderBrowseServerList() {
   }
 }
 
+const inviteLinkInput = document.getElementById('invite-link-input');
+const copyInviteBtn = document.getElementById('copy-invite-btn');
+
 serverAddBtn.addEventListener('click', () => {
   serverModal.classList.remove('hidden');
   socket.emit('list-servers');
+  inviteLinkInput.value = `${location.origin}${location.pathname}?invite=${encodeURIComponent(currentServerId)}`;
+});
+copyInviteBtn.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(inviteLinkInput.value);
+    copyInviteBtn.textContent = 'Copied!';
+  } catch (e) {
+    inviteLinkInput.select(); // clipboard API unavailable (e.g. old WebView) — fall back to select-to-copy
+    copyInviteBtn.textContent = 'Select & copy';
+  }
+  setTimeout(() => { copyInviteBtn.textContent = 'Copy'; }, 1500);
 });
 serverModalCloseBtn.addEventListener('click', () => serverModal.classList.add('hidden'));
 serverModal.addEventListener('click', (e) => { if (e.target === serverModal) serverModal.classList.add('hidden'); });
@@ -797,6 +811,13 @@ socket.on('joined', (data) => {
   refreshFriendsView();
 
   latestServerDirectory = serverList || [];
+
+  const invite = new URLSearchParams(location.search).get('invite');
+  if (invite) {
+    socket.emit('join-server', invite);
+    // `history` above shadows window.history in this scope — must qualify it
+    window.history.replaceState(null, '', location.pathname); // strip ?invite= so refreshing doesn't re-trigger it
+  }
 });
 
 socket.on('channel-history', ({ serverId, channel, history }) => {
