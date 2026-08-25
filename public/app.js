@@ -502,8 +502,58 @@ function refreshFriendsView() {
     removeBtn.addEventListener('click', () => socket.emit('friend-remove', username));
     li.append(avatar, label, removeBtn);
     friendsListEl.appendChild(li);
+    renderDmUnreadBadge(li, username);
   });
   if (!myFriends.length) friendsListEl.innerHTML = '<li class="friends-empty">No friends yet — add one above.</li>';
+}
+
+// --- DM unread badges: per-friend-row, plus a summary dot on the Friends nav item ---
+const dmUnreadCounts = {};
+function bumpDmUnread(fromUsername) {
+  dmUnreadCounts[fromUsername] = (dmUnreadCounts[fromUsername] || 0) + 1;
+  const li = [...friendsListEl.querySelectorAll('.friend-row')].find((row) => row.querySelector('.friend-name-clickable')?.textContent === fromUsername);
+  if (li) renderDmUnreadBadge(li, fromUsername);
+  renderFriendsNavBadge();
+}
+function clearDmUnread(username) {
+  if (!dmUnreadCounts[username]) return;
+  delete dmUnreadCounts[username];
+  const li = [...friendsListEl.querySelectorAll('.friend-row')].find((row) => row.querySelector('.friend-name-clickable')?.textContent === username);
+  if (li) renderDmUnreadBadge(li, username);
+  renderFriendsNavBadge();
+}
+function renderDmUnreadBadge(li, username) {
+  let badge = li.querySelector('.unread-badge');
+  const count = dmUnreadCounts[username] || 0;
+  if (count === 0) {
+    if (badge) badge.remove();
+    return;
+  }
+  if (!badge) {
+    badge = document.createElement('span');
+    badge.className = 'unread-badge';
+    // sits inline right after the name, not absolutely positioned like the
+    // sidebar channel badge — a friend-row already has a Remove button
+    // occupying the row's right edge
+    const label = li.querySelector('.friend-name-clickable');
+    if (label) label.insertAdjacentElement('afterend', badge);
+    else li.appendChild(badge);
+  }
+  badge.textContent = count > 99 ? '99+' : String(count);
+}
+function renderFriendsNavBadge() {
+  const total = Object.values(dmUnreadCounts).reduce((a, b) => a + b, 0);
+  let dot = friendsNavEl.querySelector('.unread-badge');
+  if (total === 0) {
+    if (dot) dot.remove();
+    return;
+  }
+  if (!dot) {
+    dot = document.createElement('span');
+    dot.className = 'unread-badge';
+    friendsNavEl.appendChild(dot);
+  }
+  dot.textContent = total > 99 ? '99+' : String(total);
 }
 
 addFriendForm.addEventListener('submit', (e) => {
@@ -550,6 +600,7 @@ function openDm(username) {
   dmMessageList.clear();
   socket.emit('dm-history', username);
   setMainView('dm');
+  clearDmUnread(username);
 }
 
 socket.on('dm-history', ({ withUser, history }) => {
@@ -559,7 +610,10 @@ socket.on('dm-history', ({ withUser, history }) => {
 });
 
 socket.on('dm-message', ({ withUser, msg }) => {
-  if (withUser !== currentDmUser || mainView !== 'dm') return;
+  if (withUser !== currentDmUser || mainView !== 'dm') {
+    if (msg.from !== myUsername) bumpDmUnread(withUser);
+    return;
+  }
   renderDmMessage(msg);
 });
 

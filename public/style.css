@@ -135,6 +135,7 @@ body {
 .sidebar li:hover { background: #35373c; color: #fff; }
 .sidebar li.active { background: #404249; color: #fff; }
 .nav-item {
+  position: relative;
   padding: 6px 8px;
   border-radius: 4px;
   cursor: pointer;
@@ -567,6 +568,7 @@ body {
 }
 .friends-list { list-style: none; margin: 0; padding: 0; }
 .friend-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -589,6 +591,7 @@ body {
   font-size: 12px;
   font-weight: 600;
 }
+.friend-row .unread-badge { position: static; margin-right: auto; }
 .friend-row .friend-decline-btn { background: #3a3c42; }
 .friend-row .friend-decline-btn:hover { background: #da373c; }
 .member-count { color: #949ba4; font-size: 12px; }
