@@ -242,56 +242,66 @@ function renderAttachment(att) {
 }
 
 // consecutive messages from the same author within this window are grouped
-// under one avatar/header, like real Discord — reset via clearMessages()
+// under one avatar/header, like real Discord. Shared by the channel message
+// list and the DM message list, each with its own independent grouping state.
 const GROUP_WINDOW_MS = 7 * 60 * 1000;
-let lastGroupAuthor = null;
-let lastGroupTs = 0;
 
-function clearMessages() {
-  messagesEl.innerHTML = '';
-  lastGroupAuthor = null;
-  lastGroupTs = 0;
-}
+function createMessageList(container, { onDelete } = {}) {
+  let lastGroupAuthor = null;
+  let lastGroupTs = 0;
 
-function renderMessage({ id, username, text, attachment, ts }, system = false) {
-  const div = document.createElement('div');
-  const time = new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  const mine = !system && username === myUsername;
-  const textHtml = text ? `<span class="text">${escapeHtml(text)}</span>` : '';
-  const attHtml = attachment ? renderAttachment(attachment) : '';
-  const deleteBtnHtml = mine ? '<button class="delete-btn" title="Delete">🗑</button>' : '';
-
-  if (system) {
-    div.className = 'message system';
-    if (id) div.dataset.id = id;
-    div.innerHTML = `<span class="text">${escapeHtml(text)}</span>`;
+  function clear() {
+    container.innerHTML = '';
     lastGroupAuthor = null;
-    messagesEl.appendChild(div);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
-    return;
+    lastGroupTs = 0;
   }
 
-  const grouped = username === lastGroupAuthor && (ts - lastGroupTs) < GROUP_WINDOW_MS;
-  div.className = 'message' + (grouped ? ' grouped' : '');
-  if (id) div.dataset.id = id;
-  const gutterHtml = grouped
-    ? `<span class="hover-time">${time}</span>`
-    : `<div class="avatar message-avatar"></div>`;
-  const headerHtml = grouped
-    ? ''
-    : `<div class="message-header"><span class="author">${escapeHtml(username)}</span><span class="time">${time}</span></div>`;
-  div.innerHTML = `<div class="message-gutter">${gutterHtml}</div><div class="message-body">${headerHtml}${textHtml}${attHtml}</div>${deleteBtnHtml}`;
-  if (!grouped) applyAvatar(div.querySelector('.message-avatar'), username);
-  if (mine) {
-    div.querySelector('.delete-btn').addEventListener('click', () => {
-      socket.emit('delete-message', { serverId: currentServerId, channel: currentChannel, id });
-    });
+  function render({ id, username, text, attachment, ts }, system = false) {
+    const div = document.createElement('div');
+    const time = new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const mine = !system && !!onDelete && username === myUsername;
+    const textHtml = text ? `<span class="text">${escapeHtml(text)}</span>` : '';
+    const attHtml = attachment ? renderAttachment(attachment) : '';
+    const deleteBtnHtml = mine ? '<button class="delete-btn" title="Delete">🗑</button>' : '';
+
+    if (system) {
+      div.className = 'message system';
+      if (id) div.dataset.id = id;
+      div.innerHTML = `<span class="text">${escapeHtml(text)}</span>`;
+      lastGroupAuthor = null;
+      container.appendChild(div);
+      container.scrollTop = container.scrollHeight;
+      return;
+    }
+
+    const grouped = username === lastGroupAuthor && (ts - lastGroupTs) < GROUP_WINDOW_MS;
+    div.className = 'message' + (grouped ? ' grouped' : '');
+    if (id) div.dataset.id = id;
+    const gutterHtml = grouped
+      ? `<span class="hover-time">${time}</span>`
+      : `<div class="avatar message-avatar"></div>`;
+    const headerHtml = grouped
+      ? ''
+      : `<div class="message-header"><span class="author">${escapeHtml(username)}</span><span class="time">${time}</span></div>`;
+    div.innerHTML = `<div class="message-gutter">${gutterHtml}</div><div class="message-body">${headerHtml}${textHtml}${attHtml}</div>${deleteBtnHtml}`;
+    if (!grouped) applyAvatar(div.querySelector('.message-avatar'), username);
+    if (mine) {
+      div.querySelector('.delete-btn').addEventListener('click', () => onDelete(id));
+    }
+    lastGroupAuthor = username;
+    lastGroupTs = ts;
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
   }
-  lastGroupAuthor = username;
-  lastGroupTs = ts;
-  messagesEl.appendChild(div);
-  messagesEl.scrollTop = messagesEl.scrollHeight;
+
+  return { clear, render };
 }
+
+const channelMessageList = createMessageList(messagesEl, {
+  onDelete: (id) => socket.emit('delete-message', { serverId: currentServerId, channel: currentChannel, id }),
+});
+function clearMessages() { channelMessageList.clear(); }
+function renderMessage(msg, system = false) { channelMessageList.render(msg, system); }
 
 const AVATAR_COLORS = ['#5865f2', '#57f287', '#fee75c', '#eb459e', '#ed4245', '#f0a020', '#23a55a', '#00a8fc'];
 function avatarColor(name) {
@@ -533,16 +543,18 @@ socket.on('friend-removed', (username) => {
 });
 
 // --- direct messages ---
+const dmMessageList = createMessageList(dmMessagesEl); // no onDelete — DMs aren't deletable (server has no dm-delete event)
+
 function openDm(username) {
   currentDmUser = username;
-  dmMessagesEl.innerHTML = '';
+  dmMessageList.clear();
   socket.emit('dm-history', username);
   setMainView('dm');
 }
 
 socket.on('dm-history', ({ withUser, history }) => {
   if (withUser !== currentDmUser) return;
-  dmMessagesEl.innerHTML = '';
+  dmMessageList.clear();
   history.forEach((m) => renderDmMessage(m));
 });
 
@@ -552,12 +564,7 @@ socket.on('dm-message', ({ withUser, msg }) => {
 });
 
 function renderDmMessage({ from, text, ts }) {
-  const div = document.createElement('div');
-  div.className = 'message';
-  const time = new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  div.innerHTML = `<span class="author">${escapeHtml(from)}</span><span class="time">${time}</span><br/><span class="text">${escapeHtml(text)}</span>`;
-  dmMessagesEl.appendChild(div);
-  dmMessagesEl.scrollTop = dmMessagesEl.scrollHeight;
+  dmMessageList.render({ username: from, text, ts });
 }
 
 dmForm.addEventListener('submit', (e) => {
