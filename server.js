@@ -196,6 +196,15 @@ app.use(express.static(PUBLIC_DIR, {
   setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
 }));
 
+// diagnostic beacon: the client posts here when getUserMedia() fails after
+// every fallback, so the exact browser-reported error is visible in server
+// logs without depending on a user accurately relaying technical text
+app.post('/api/client-log', express.json({ limit: '2kb' }), (req, res) => {
+  const { context, name, message, ua } = req.body || {};
+  console.log(`[client-error] context=${context} name=${name} message=${message} ua=${ua}`);
+  res.status(204).end();
+});
+
 app.post('/api/upload', (req, res) => {
   upload.single('file')(req, res, (err) => {
     if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {

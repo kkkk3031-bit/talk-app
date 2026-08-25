@@ -1120,8 +1120,21 @@ async function acquireMicStream() {
       if (i < attempts.length - 1) await new Promise((r) => setTimeout(r, 350));
     }
   }
+  reportMediaError('microphone', lastErr);
   alert(mediaErrorMessage(lastErr, 'microphone'));
   return null;
+}
+
+// fire-and-forget: lets the exact browser-reported error show up in server
+// logs instead of relying on someone accurately relaying technical text
+function reportMediaError(context, err) {
+  try {
+    fetch('/api/client-log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ context, name: err.name, message: err.message, ua: navigator.userAgent }),
+    }).catch(() => {});
+  } catch (e) { /* ignore — this is best-effort diagnostics, never block the user-facing error */ }
 }
 
 // maps getUserMedia() DOMException names to what the user should actually do,
@@ -1154,6 +1167,7 @@ async function startCamera() {
   try {
     cameraStream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240 } });
   } catch (err) {
+    reportMediaError('camera', err);
     alert(mediaErrorMessage(err, 'camera'));
     return;
   }
