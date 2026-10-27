@@ -28,16 +28,33 @@ const DMS_FILE = path.join(DATA_DIR, 'dms.json');
 const UPLOAD_DIR = path.join(__dirname, 'public', 'uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
-const ALLOWED_MIME = new Set([
-  'image/png', 'image/jpeg', 'image/gif', 'image/webp',
-  'application/pdf', 'text/plain',
-  'application/zip', 'application/msword',
-]);
+// MIME -> canonical extension. The stored extension is derived from the
+// *validated* MIME type, never from the client-supplied originalname: multer's
+// fileFilter only checks mimetype, and the on-disk extension is what decides
+// the Content-Type express.static serves. Deriving the extension from
+// originalname let an attacker pass an allowed mime (e.g. text/plain) while
+// keeping a dangerous name (evil.html) — stored under public/uploads/ and then
+// served as text/html, i.e. stored XSS in the app's own origin. Mapping mime
+// to a fixed safe extension closes that. (Note: image/svg+xml is deliberately
+// absent — SVG can carry inline script.)
+const MIME_EXT = {
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/gif': '.gif',
+  'image/webp': '.webp',
+  'application/pdf': '.pdf',
+  'text/plain': '.txt',
+  'application/zip': '.zip',
+  'application/msword': '.doc',
+};
+const ALLOWED_MIME = new Set(Object.keys(MIME_EXT));
 const upload = multer({
   storage: multer.diskStorage({
     destination: UPLOAD_DIR,
+    // fileFilter runs first and rejects any mime not in MIME_EXT, so the lookup
+    // here is always a hit; the `|| ''` is purely defensive.
     filename: (req, file, cb) => {
-      const ext = path.extname(file.originalname).slice(0, 10).replace(/[^a-zA-Z0-9.]/g, '');
+      const ext = MIME_EXT[file.mimetype] || '';
       cb(null, `${Date.now()}-${crypto.randomBytes(6).toString('hex')}${ext}`);
     },
   }),
